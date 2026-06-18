@@ -13,9 +13,9 @@ import (
 	"github.com/nuclide-research/cascade/engine"
 )
 
-// webgui/index.html is embedded at build time. Pure Go, no runtime asset path.
+// webgui assets are embedded at build time. Pure Go, no runtime asset path.
 //
-//go:embed webgui/index.html
+//go:embed webgui/index.html webgui/favicon.svg
 var webFS embed.FS
 
 // --- SSE wire types -------------------------------------------------------
@@ -58,6 +58,8 @@ func serveGUI() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
+	mux.HandleFunc("/favicon.ico", handleFavicon)
+	mux.HandleFunc("/favicon.svg", handleFavicon)
 	mux.HandleFunc("/graph", handleGraph)
 	mux.HandleFunc("/run", handleRun)
 
@@ -80,6 +82,19 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+// handleFavicon serves the embedded SVG favicon (also at /favicon.ico to kill
+// the browser's automatic probe). Browsers honor the Content-Type over the path.
+func handleFavicon(w http.ResponseWriter, r *http.Request) {
+	data, err := webFS.ReadFile("webgui/favicon.svg")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(data)
 }
 
