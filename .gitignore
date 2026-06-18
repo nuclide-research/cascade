@@ -1,3 +1,4 @@
 cascade
 *.db
 *.log
+research/

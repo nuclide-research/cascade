@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>cascade</title>
+<style>
+  /* ============================================================= *
+   *  cascade - DNS/IP recon dependency-DAG visualizer             *
+   *  Layered column cascade + bipartite DAG. No external assets.  *
+   *  Offline-native. Vanilla JS. XSS-safe by construction.        *
+   * ============================================================= */
+  :root{
+    --bg:#0a0e14; --bg2:#0d1320; --panel:#0f1726; --panel2:#121d30;
+    --line:#1c2740; --line2:#26344f;
+    --ink:#c7d2e1; --dim:#5d6b86; --dimmer:#3b475e;
+    --mag:#ff3fa4; --mag2:#ff7ac6; --cyan:#36e0e0; --cyan-d:#1d9c9c;
+    --green:#3fe07a; --green-d:#1f8a4c; --red:#ff5468; --amber:#ffb83f;
+    --run:#5aa9ff;
+    --mono:ui-monospace,"JetBrains Mono","SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
+    --r:8px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:
+      radial-gradient(1200px 600px at 15% -10%,rgba(255,63,164,.07),transparent 60%),
+      radial-gradient(1000px 700px at 95% 0%,rgba(54,224,224,.06),transparent 55%),
+      var(--bg);
+    color:var(--ink);font-family:var(--mono);font-size:13px;line-height:1.45;
+    -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;min-height:100vh;
+    overflow:hidden;
+  }
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px;border:2px solid var(--bg)}
+  ::-webkit-scrollbar-thumb:hover{background:#33476b}
+  button,input{font-family:inherit;font-size:inherit}
+  :focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+
+  /* ---- top bar ---- */
+  header{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:12px 18px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(15,23,38,.9),rgba(10,14,20,.6));
+    backdrop-filter:blur(6px);position:relative;z-index:30;
+  }
+  .brand{display:flex;align-items:baseline;gap:10px;user-select:none}
+  .wordmark{
+    font-weight:800;font-size:22px;letter-spacing:.22em;color:var(--mag);
+    text-shadow:0 0 18px rgba(255,63,164,.55),0 0 2px rgba(255,63,164,.9);
+  }
+  .tagline{color:var(--dim);font-size:11px;letter-spacing:.04em}
+  .spacer{flex:1 1 40px}
+
+  .field{display:flex;align-items:stretch;gap:0;min-width:260px;flex:1 1 340px;max-width:540px}
+  #target{
+    flex:1;background:var(--bg2);border:1px solid var(--line2);border-right:none;
+    color:var(--ink);padding:9px 12px;border-radius:var(--r) 0 0 var(--r);outline:none;
+    caret-color:var(--mag);min-width:0;
+  }
+  #target::placeholder{color:var(--dimmer)}
+  #target:focus{border-color:var(--cyan-d);box-shadow:0 0 0 1px rgba(54,224,224,.25)}
+  .btn{
+    border:1px solid var(--line2);background:var(--panel2);color:var(--ink);
+    padding:9px 16px;cursor:pointer;border-radius:0 var(--r) var(--r) 0;white-space:nowrap;
+    transition:background .12s,border-color .12s,color .12s;letter-spacing:.04em;
+  }
+  .btn:hover{background:#18243a;border-color:#33476b}
+  .btn:active{transform:translateY(1px)}
+  .btn-run{
+    background:linear-gradient(180deg,#ff4fae,#e21f8a);border-color:#ff5fb6;color:#1a0512;
+    font-weight:700;box-shadow:0 0 14px rgba(255,63,164,.35);
+  }
+  .btn-run:hover{background:linear-gradient(180deg,#ff66ba,#f02b97)}
+  .btn-run[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none;filter:saturate(.4)}
+  .btn-stop{
+    background:linear-gradient(180deg,#ff6072,#e0303f);border-color:#ff6f7e;color:#1a0508;font-weight:700;
+  }
+  .btn-stop:hover{background:linear-gradient(180deg,#ff7484,#f03e4e)}
+  .btn-ghost{border-radius:var(--r);border:1px solid var(--line2);background:transparent;color:var(--dim);padding:9px 13px}
+  .btn-ghost:hover{color:var(--cyan);border-color:var(--cyan-d)}
+  .btn-ghost[disabled]{opacity:.4;cursor:not-allowed;color:var(--dim);border-color:var(--line2)}
+  .btn-ghost.on{color:var(--cyan);border-color:var(--cyan-d);background:rgba(54,224,224,.07)}
+
+  /* segmented view toggle */
+  .seg-toggle{display:flex;border:1px solid var(--line2);border-radius:var(--r);overflow:hidden}
+  .seg-toggle button{
+    border:none;background:transparent;color:var(--dim);padding:9px 13px;cursor:pointer;
+    transition:background .12s,color .12s;letter-spacing:.04em;
+  }
+  .seg-toggle button + button{border-left:1px solid var(--line2)}
+  .seg-toggle button:hover{color:var(--ink)}
+  .seg-toggle button.active{background:rgba(54,224,224,.1);color:var(--cyan)}
+
+  .status{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dim);white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dimmer);box-shadow:0 0 0 0 transparent}
+  .dot.live{background:var(--green);box-shadow:0 0 10px rgba(63,224,122,.8)}
+  .dot.run{background:var(--run);animation:pulseDot 1s infinite}
+  .dot.err{background:var(--red);box-shadow:0 0 10px rgba(255,84,104,.8)}
+  @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.25}}
+
+  /* ---- DAG stats line ---- */
+  #stats{
+    display:flex;align-items:center;gap:0;flex-wrap:wrap;
+    padding:6px 18px;border-bottom:1px solid var(--line);background:var(--bg2);
+    font-size:11px;color:var(--dim);position:relative;z-index:20;
+  }
+  #stats .st{display:flex;align-items:center;gap:5px;padding:0 14px;border-right:1px solid var(--line)}
+  #stats .st:last-of-type{border-right:none}
+  #stats .st .k{color:var(--dimmer);letter-spacing:.04em}
+  #stats .st .v{color:var(--ink);font-weight:700}
+  #stats .st .v.g{color:var(--green)} #stats .st .v.r{color:var(--red)} #stats .st .v.b{color:var(--run)} #stats .st .v.m{color:var(--mag2)}
+  #legend{margin-left:auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding-left:14px}
+  #legend .lg{display:flex;align-items:center;gap:5px;color:var(--dim);font-size:10px}
+  #legend .lg .gl{font-weight:700;width:12px;text-align:center}
+  #legend .gl.done{color:var(--green)} #legend .gl.error{color:var(--red)}
+  #legend .gl.idle{color:var(--dim)} #legend .gl.never{color:var(--dimmer)}
+  #legend .sw{width:11px;height:11px;border-radius:3px;border:1px solid var(--line2)}
+  #legend .sw.tool{background:var(--panel2)} #legend .sw.key{transform:rotate(45deg);width:9px;height:9px;border-color:var(--cyan-d);background:rgba(54,224,224,.1)}
+
+  /* ---- layout ---- */
+  main{flex:1;display:flex;min-height:0;position:relative}
+
+  /* ---- left minimap rail ---- */
+  #rail{
+    flex:0 0 218px;display:flex;flex-direction:column;border-right:1px solid var(--line);
+    background:linear-gradient(180deg,var(--bg2),var(--bg));min-height:0;transition:flex-basis .2s,margin .2s;
+  }
+  #rail.collapsed{flex-basis:0;margin-left:-1px;overflow:hidden;border-right:none}
+  .rail-head{
+    display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);
+    font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan);
+  }
+  .rail-head .c{margin-left:auto;color:var(--dim);letter-spacing:0;text-transform:none}
+  .progress{height:5px;background:var(--line);position:relative;overflow:hidden}
+  .progress .bar{position:absolute;inset:0 100% 0 0;background:linear-gradient(90deg,var(--green-d),var(--green));transition:right .35s ease}
+  #minimap{flex:1;overflow:auto;padding:6px 6px 12px}
+  .mini{
+    display:flex;align-items:center;gap:7px;padding:4px 8px;border-radius:6px;cursor:pointer;
+    font-size:11px;color:var(--dim);transition:background .12s,color .12s;
+  }
+  .mini:hover{background:rgba(255,255,255,.04);color:var(--ink)}
+  .mini .mg{width:12px;flex:0 0 12px;text-align:center;font-weight:700;color:var(--dimmer)}
+  .mini .mn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mini.done{color:var(--ink)} .mini.done .mg{color:var(--green)}
+  .mini.error{color:#ffc4cb} .mini.error .mg{color:var(--red)}
+  .mini.running{color:#dbe9ff} .mini.running .mg{color:var(--run)}
+  .mini.never{opacity:.45} .mini.never .mg{color:var(--dimmer)}
+  .mini.hidden{display:none}
+
+  /* ---- center stage ---- */
+  #stage{
+    flex:1 1 auto;min-width:0;position:relative;overflow:auto;
+    background:
+      linear-gradient(var(--line) 1px,transparent 1px) 0 0/100% 34px,
+      linear-gradient(90deg,rgba(28,39,64,.5) 1px,transparent 1px) 0 0/120px 100%;
+    background-color:var(--bg);
+  }
+  #stage::before{content:"";position:absolute;inset:0;background:
+    radial-gradient(900px 500px at 30% 20%,rgba(54,224,224,.04),transparent 60%);pointer-events:none}
+  #canvas{position:relative;min-width:100%;min-height:100%;padding:26px 30px 60px}
+  #edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+
+  .columns{display:flex;gap:64px;align-items:flex-start;position:relative;z-index:2;min-width:max-content}
+  .col{display:flex;flex-direction:column;gap:14px;min-width:172px}
+  .col-head{
+    font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);
+    border-bottom:1px solid var(--line2);padding-bottom:6px;margin-bottom:2px;
+    display:flex;align-items:center;gap:6px;
+  }
+  .col-head .k{color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0}
+  .col-count{margin-left:auto;color:var(--dimmer);font-size:10px}
+
+  /* ---- seed node ---- */
+  .seed{
+    align-self:flex-start;border:1px solid var(--mag);border-radius:var(--r);
+    background:linear-gradient(180deg,rgba(255,63,164,.14),rgba(255,63,164,.04));
+    padding:12px 14px;min-width:160px;box-shadow:0 0 22px rgba(255,63,164,.25);position:relative;
+  }
+  .seed .lbl{font-size:9px;letter-spacing:.2em;color:var(--mag2);text-transform:uppercase}
+  .seed .val{color:#fff;font-weight:700;word-break:break-all;margin-top:3px}
+  .seed .keys{margin-top:8px;display:flex;flex-wrap:wrap;gap:4px}
+
+  /* ---- tool node (column view) ---- */
+  .node{
+    border:1px solid var(--line2);border-radius:var(--r);background:var(--panel);
+    padding:9px 11px;position:relative;cursor:pointer;
+    transition:border-color .25s,box-shadow .25s,background .25s,transform .12s,opacity .2s;
+    --accent:var(--dimmer);
+  }
+  .node:hover{transform:translateY(-1px);border-color:#33476b}
+  .node .nm{font-size:12px;color:var(--dim);font-weight:600;display:flex;align-items:center;gap:7px;line-height:1.25}
+  .node .glyph{width:14px;flex:0 0 14px;text-align:center;color:var(--accent);font-weight:700}
+  .node .io{margin-top:6px;display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+  .node .arrow{color:var(--dimmer);font-size:9px;margin:0 1px}
+
+  .node.idle{opacity:.62}
+  .node.never{opacity:.38;filter:grayscale(.4)}
+  .node.running{
+    --accent:var(--run);border-color:var(--run);background:var(--panel2);opacity:1;
+    box-shadow:0 0 0 1px rgba(90,169,255,.35),0 0 18px rgba(90,169,255,.22);
+    animation:nodePulse 1.1s ease-in-out infinite;
+  }
+  .node.running .nm{color:#dbe9ff}
+  @keyframes nodePulse{0%,100%{box-shadow:0 0 0 1px rgba(90,169,255,.35),0 0 14px rgba(90,169,255,.18)}
+    50%{box-shadow:0 0 0 1px rgba(90,169,255,.55),0 0 24px rgba(90,169,255,.4)}}
+  .node.done{--accent:var(--green);border-color:rgba(63,224,122,.55);opacity:1;background:linear-gradient(180deg,rgba(63,224,122,.06),var(--panel))}
+  .node.done .nm{color:var(--ink)}
+  .node.error{--accent:var(--red);border-color:rgba(255,84,104,.6);opacity:1;background:linear-gradient(180deg,rgba(255,84,104,.07),var(--panel))}
+  .node.error .nm{color:#ffc4cb}
+  .node.landed{animation:land .55s ease-out}
+  @keyframes land{0%{transform:scale(.94);box-shadow:0 0 0 6px rgba(63,224,122,.0)}
+    35%{transform:scale(1.015);box-shadow:0 0 0 4px rgba(63,224,122,.22)}
+    100%{transform:scale(1);box-shadow:0 0 0 0 rgba(63,224,122,0)}}
+  .node.sel{outline:1px solid var(--cyan);outline-offset:1px}
+  .node.dimmed{opacity:.14;filter:grayscale(.6)}
+  .node.nbr{border-color:var(--cyan-d);box-shadow:0 0 0 1px rgba(54,224,224,.4)}
+
+  /* ---- key chips ---- */
+  .chip{
+    display:inline-flex;align-items:center;gap:3px;font-size:9px;letter-spacing:.02em;
+    padding:1px 6px;border-radius:20px;border:1px solid var(--line2);color:var(--dim);
+    background:rgba(255,255,255,.015);white-space:nowrap;
+  }
+  .chip.req{border-color:rgba(54,224,224,.3);color:var(--cyan)}
+  .chip.prod{border-color:rgba(255,63,164,.3);color:var(--mag2)}
+  .chip.have{border-color:var(--green-d);color:var(--green);background:rgba(63,224,122,.07)}
+  .chip .n{color:var(--dimmer);font-size:9px}
+
+  /* ---- empty / idle onboarding state ---- */
+  .onboard{max-width:760px;margin:14px auto 0;padding:18px 6px}
+  .onboard h2{font-size:13px;color:var(--cyan);letter-spacing:.1em;text-transform:uppercase;margin:0 0 4px;font-weight:700}
+  .onboard p{color:var(--dim);margin:0 0 16px;line-height:1.6}
+  .onboard p b{color:var(--ink);font-weight:600}
+  .seed-pills{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:22px}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:20px;
+    background:var(--panel);color:var(--ink);padding:7px 14px;cursor:pointer;font-size:12px;
+    transition:border-color .14s,background .14s,transform .1s;
+  }
+  .pill:hover{border-color:var(--mag);background:rgba(255,63,164,.08);transform:translateY(-1px)}
+  .pill:active{transform:translateY(0)}
+  .pill .tag{font-size:9px;color:var(--mag2);letter-spacing:.08em;text-transform:uppercase}
+  .pill .ex{color:var(--ink)}
+  .detect{border:1px solid var(--line);border-radius:var(--r);background:rgba(13,19,32,.6);padding:14px 16px}
+  .detect .dh{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--mag2);margin-bottom:10px}
+  .detect table{border-collapse:collapse;width:100%;font-size:11.5px}
+  .detect td{padding:4px 10px 4px 0;vertical-align:top;border-bottom:1px dashed rgba(28,39,64,.55)}
+  .detect tr:last-child td{border-bottom:none}
+  .detect td.rule{color:var(--cyan);white-space:nowrap}
+  .detect td.arr{color:var(--dimmer);text-align:center;width:24px}
+  .detect td.key{color:var(--green)}
+  .detect td.desc{color:var(--dim)}
+
+  /* ---- results panel ---- */
+  #side{
+    flex:0 0 36%;max-width:520px;min-width:300px;display:flex;flex-direction:column;
+    border-left:1px solid var(--line);background:linear-gradient(180deg,var(--bg2),var(--bg));min-height:0;
+  }
+  .side-head{
+    display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);
+    font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);
+  }
+  .side-head .ct{margin-left:auto;color:var(--dim);letter-spacing:0;text-transform:none;font-size:11px}
+
+  /* filter / triage bar */
+  #filterbar{border-bottom:1px solid var(--line);padding:9px 12px 10px;display:flex;flex-direction:column;gap:8px}
+  .filt-search{
+    width:100%;background:var(--bg2);border:1px solid var(--line2);color:var(--ink);
+    padding:7px 11px;border-radius:6px;outline:none;font-size:12px;
+  }
+  .filt-search::placeholder{color:var(--dimmer)}
+  .filt-search:focus{border-color:var(--cyan-d)}
+  .cats{display:flex;flex-wrap:wrap;gap:6px}
+  .cat{
+    display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:20px;
+    background:var(--panel);color:var(--dim);padding:3px 10px;cursor:pointer;font-size:10.5px;
+    transition:border-color .12s,color .12s,background .12s;user-select:none;
+  }
+  .cat:hover{color:var(--ink);border-color:#33476b}
+  .cat.active{border-color:var(--cyan-d);color:var(--cyan);background:rgba(54,224,224,.08)}
+  .cat.empty{opacity:.4}
+  .cat .cn{font-size:9px;color:var(--dimmer);background:var(--bg2);border-radius:20px;padding:0 5px}
+  .cat.active .cn{color:var(--cyan)}
+
+  #results{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+  .empty{color:var(--dimmer);text-align:center;padding:40px 12px;font-size:12px;line-height:1.8}
+  .empty b{color:var(--dim);font-weight:600}
+  .noresults{color:var(--dimmer);text-align:center;padding:30px 12px;font-size:12px}
+
+  .card{
+    border:1px solid var(--line2);border-radius:var(--r);background:var(--panel);
+    overflow:hidden;border-left:3px solid var(--accent,var(--dimmer));animation:slideIn .35s ease-out;
+  }
+  @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .card.done{--accent:var(--green)} .card.error{--accent:var(--red)} .card.empty-r{--accent:var(--dimmer)}
+  .card.flash{animation:flashCard 1.1s ease-out}
+  @keyframes flashCard{0%{box-shadow:0 0 0 2px var(--cyan),0 0 18px rgba(54,224,224,.5)}100%{box-shadow:none}}
+  .card.hidden{display:none}
+  .card-head{display:flex;align-items:center;gap:8px;padding:8px 11px;cursor:pointer;background:rgba(255,255,255,.012)}
+  .card-head:hover{background:rgba(255,255,255,.03)}
+  .card-head .g{color:var(--accent,var(--dim));font-weight:700;width:12px;text-align:center}
+  .card-head .t{font-weight:700;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .card-head .cat-tag{font-size:9px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;opacity:.7}
+  .card-head .badge{font-size:9px;color:var(--dim);padding:1px 7px;border:1px solid var(--line2);border-radius:20px}
+  .card.error .card-head .t{color:#ffc4cb}
+  .card-head .car{color:var(--dimmer);transition:transform .15s;font-size:10px}
+  .card.collapsed .car{transform:rotate(-90deg)}
+  .card.collapsed .card-body{display:none}
+  .card-body{padding:4px 11px 9px;font-size:12px}
+  .errmsg{color:var(--red);padding:7px 0 2px;word-break:break-word;font-size:11.5px}
+
+  .row{display:flex;gap:10px;padding:3px 0;border-bottom:1px dashed rgba(28,39,64,.6)}
+  .row:last-child{border-bottom:none}
+  .row .l{color:var(--dim);flex:0 0 38%;max-width:42%;word-break:break-word}
+  .row .v{color:var(--ink);flex:1;min-width:0;word-break:break-word;white-space:pre-wrap}
+  .row .v.bad{color:var(--red)} .row .v.warn{color:var(--amber)} .row .v.ok{color:var(--green)}
+  .sub{margin:2px 0 4px 14px;border-left:1px solid var(--line2);padding-left:10px}
+  .sub .row .l{color:var(--dimmer);flex-basis:44%}
+
+  .prodline{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+  .prodline .pk{font-size:9px;color:var(--dimmer);letter-spacing:.1em;text-transform:uppercase;margin-right:2px}
+
+  /* ---- state snapshot drawer ---- */
+  #snapshot{border-top:1px solid var(--line);padding:11px 14px;max-height:33%;overflow:auto;display:none}
+  #snapshot.show{display:block}
+  .snap-head{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);margin-bottom:8px;display:flex;align-items:center;gap:8px}
+  .snap-head .c{margin-left:auto;color:var(--dim);letter-spacing:0;text-transform:none}
+  .snap-grp{margin-bottom:9px}
+  .snap-grp .gk{font-size:10px;color:var(--mag2);letter-spacing:.06em;margin-bottom:3px;display:flex;gap:6px;align-items:center}
+  .snap-grp .gk .n{color:var(--dimmer)}
+  .snap-vals{display:flex;flex-wrap:wrap;gap:5px}
+  .sv{font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid var(--green-d);
+    color:var(--green);background:rgba(63,224,122,.06);word-break:break-all;max-width:100%}
+  .sv.more{border-color:var(--line2);color:var(--dim);background:transparent}
+
+  /* ---- footer ---- */
+  footer{
+    border-top:1px solid var(--line);padding:5px 16px;display:flex;align-items:center;gap:14px;
+    font-size:10.5px;color:var(--dim);background:var(--bg2);position:relative;z-index:20;flex-wrap:wrap;
+  }
+  footer .seg{display:flex;align-items:center;gap:6px}
+  footer .k{color:var(--dimmer)} footer .v{color:var(--ink)}
+  footer .v.g{color:var(--green)} footer .v.r{color:var(--red)} footer .v.b{color:var(--run)}
+  #log{margin-left:auto;color:var(--dimmer);max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+
+  /* ---- edges (column view bezier + dag view straight) ---- */
+  .edge{fill:none;stroke:var(--line2);stroke-width:1.4;opacity:.5;transition:opacity .3s,stroke .3s}
+  .edge.armed{stroke:#2f415f;opacity:.75}
+  .edge.live{stroke:var(--green);opacity:.95;stroke-width:1.8;filter:drop-shadow(0 0 4px rgba(63,224,122,.55))}
+  .edge.dimmed{opacity:.06}
+  .edge.nbr{stroke:var(--cyan);opacity:.9;stroke-width:1.8}
+  .edge-dot{fill:var(--mag2);filter:drop-shadow(0 0 5px rgba(255,122,198,.9))}
+
+  /* ---- bipartite DAG view ---- */
+  #dagview{position:relative;min-width:max-content;min-height:100%;display:none}
+  #dagview.show{display:block}
+  #stage.dag #canvas > .columns{display:none}
+  .dag-cols{display:flex;gap:96px;align-items:flex-start;position:relative;z-index:2;padding:8px 0}
+  .dag-col{display:flex;flex-direction:column;gap:18px;min-width:150px}
+  .dag-col-h{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--dimmer);text-align:center;margin-bottom:2px}
+  .knode{
+    align-self:center;width:118px;min-height:40px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    border:1px solid var(--cyan-d);background:rgba(54,224,224,.06);color:var(--cyan);
+    clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);padding:14px 8px;cursor:pointer;text-align:center;
+    transition:opacity .2s,background .25s,border-color .25s;position:relative;--accent:var(--cyan-d);
+  }
+  .knode .kn-l{font-size:10.5px;font-weight:700;line-height:1.1}
+  .knode .kn-n{font-size:9px;color:var(--dim);margin-top:1px}
+  .knode.have{border-color:var(--green);background:rgba(63,224,122,.12);color:var(--green);box-shadow:0 0 14px rgba(63,224,122,.3)}
+  .knode.seeded{border-color:var(--mag);background:rgba(255,63,164,.12);color:var(--mag2);box-shadow:0 0 14px rgba(255,63,164,.3)}
+  .knode.dimmed{opacity:.14}
+  .knode.nbr{box-shadow:0 0 0 1px rgba(54,224,224,.5)}
+  .tnode{
+    border:1px solid var(--line2);border-radius:var(--r);background:var(--panel);padding:8px 10px;
+    cursor:pointer;--accent:var(--dimmer);transition:border-color .25s,box-shadow .25s,background .25s,opacity .2s;position:relative;
+  }
+  .tnode .tn-nm{font-size:11px;color:var(--dim);font-weight:600;display:flex;align-items:center;gap:6px}
+  .tnode .tn-g{width:12px;text-align:center;font-weight:700;color:var(--accent)}
+  .tnode.idle{opacity:.62}
+  .tnode.never{opacity:.36;filter:grayscale(.4)}
+  .tnode.running{--accent:var(--run);border-color:var(--run);background:var(--panel2);opacity:1;animation:nodePulse 1.1s ease-in-out infinite}
+  .tnode.running .tn-nm{color:#dbe9ff}
+  .tnode.done{--accent:var(--green);border-color:rgba(63,224,122,.55);opacity:1;background:linear-gradient(180deg,rgba(63,224,122,.06),var(--panel))}
+  .tnode.done .tn-nm{color:var(--ink)}
+  .tnode.error{--accent:var(--red);border-color:rgba(255,84,104,.6);opacity:1;background:linear-gradient(180deg,rgba(255,84,104,.07),var(--panel))}
+  .tnode.error .tn-nm{color:#ffc4cb}
+  .tnode.landed{animation:land .55s ease-out}
+  .tnode.sel{outline:1px solid var(--cyan);outline-offset:1px}
+  .tnode.dimmed{opacity:.14;filter:grayscale(.6)}
+  .tnode.nbr{border-color:var(--cyan-d);box-shadow:0 0 0 1px rgba(54,224,224,.4)}
+
+  /* ---- toast ---- */
+  #toast{position:fixed;left:50%;bottom:54px;transform:translateX(-50%) translateY(20px);
+    background:var(--panel2);border:1px solid var(--red);color:#ffd6db;padding:9px 16px;border-radius:var(--r);
+    font-size:12px;box-shadow:0 8px 30px rgba(0,0,0,.5);opacity:0;pointer-events:none;
+    transition:opacity .25s,transform .25s;z-index:50;max-width:80vw}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* ---- responsive ---- */
+  @media(max-width:1100px){ #rail{flex-basis:180px} }
+  @media(max-width:980px){
+    body{overflow:auto}
+    main{flex-direction:column}
+    #rail{flex:none;width:100%;border-right:none;border-bottom:1px solid var(--line);max-height:22vh}
+    #rail.collapsed{max-height:0;border-bottom:none}
+    #stage{flex:none;height:54vh}
+    #side{flex:none;max-width:none;min-width:0;width:100%;border-left:none;border-top:1px solid var(--line);height:auto;min-height:42vh}
+    #snapshot{max-height:none}
+    #legend{display:none}
+  }
+  @media(max-width:560px){
+    .wordmark{font-size:18px}.tagline{display:none}
+    header{padding:10px 12px}.field{flex-basis:100%;order:5}
+    .col{min-width:150px}.columns{gap:42px}
+    #stats .st{padding:0 9px}
+  }
+  @media(prefers-reduced-motion:reduce){
+    *{animation-duration:.001s!important;transition-duration:.05s!important}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="wordmark">CASCADE</span>
+    <span class="tagline">DNS / IP recon - dependency DAG</span>
+  </div>
+  <div class="field">
+    <input id="target" type="text" autocomplete="off" spellcheck="false"
+           placeholder="domain - IPv4 - IPv6 - email - MAC" aria-label="recon target">
+    <button id="run" class="btn btn-run">RUN</button>
+  </div>
+  <div class="seg-toggle" role="group" aria-label="graph view">
+    <button id="view-cols" class="active" title="layered column cascade" aria-pressed="true">COLUMNS</button>
+    <button id="view-dag" title="bipartite dependency graph" aria-pressed="false">GRAPH</button>
+  </div>
+  <button id="rail-toggle" class="btn-ghost on" title="toggle the tool minimap" aria-pressed="true">MAP</button>
+  <button id="export" class="btn-ghost" disabled title="download accumulated results as JSON">EXPORT</button>
+  <div class="status"><span id="conn-dot" class="dot"></span><span id="conn-txt">idle</span></div>
+</header>
+
+<div id="stats" aria-label="DAG run telemetry">
+  <div class="st"><span class="k">tools</span><span class="v" id="s-tools">0</span></div>
+  <div class="st"><span class="k">keys</span><span class="v m" id="s-keys">0</span></div>
+  <div class="st"><span class="k">fired</span><span class="v g" id="s-fired">0</span></div>
+  <div class="st"><span class="k">err</span><span class="v r" id="s-err">0</span></div>
+  <div class="st"><span class="k">keys lit</span><span class="v b" id="s-lit">0</span></div>
+  <div id="legend" aria-hidden="true">
+    <span class="lg"><span class="gl done">&#9679;</span>done</span>
+    <span class="lg"><span class="gl error">&#10007;</span>error</span>
+    <span class="lg"><span class="gl idle">&#9675;</span>idle</span>
+    <span class="lg"><span class="gl never">&middot;</span>never fired</span>
+    <span class="lg"><span class="sw tool"></span>tool</span>
+    <span class="lg"><span class="sw key"></span>key</span>
+  </div>
+</div>
+
+<main>
+  <aside id="rail" aria-label="tool minimap">
+    <div class="rail-head">Tools <span class="c" id="mini-count">0 / 0</span></div>
+    <div class="progress"><div class="bar" id="prog-bar"></div></div>
+    <div id="minimap"></div>
+  </aside>
+
+  <section id="stage" aria-label="cascade graph">
+    <div id="canvas">
+      <svg id="edges" preserveAspectRatio="none" aria-hidden="true"></svg>
+      <div class="columns" id="columns"></div>
+      <div id="dagview"></div>
+    </div>
+  </section>
+
+  <aside id="side">
+    <div class="side-head">Results <span class="ct" id="rcount">0 tools</span></div>
+    <div id="filterbar">
+      <input id="filter" class="filt-search" type="text" autocomplete="off" spellcheck="false"
+             placeholder="filter results..." aria-label="filter result cards">
+      <div class="cats" id="cats" role="group" aria-label="category filter"></div>
+    </div>
+    <div id="results">
+      <!-- onboarding empty-state injected here -->
+    </div>
+    <div id="snapshot">
+      <div class="snap-head">State Snapshot <span class="c" id="snapcount"></span></div>
+      <div id="snap-body"></div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <div class="seg"><span class="k">target</span><span class="v" id="f-target">-</span></div>
+  <div class="seg"><span class="k">done</span><span class="v g" id="f-done">0</span></div>
+  <div class="seg"><span class="k">err</span><span class="v r" id="f-err">0</span></div>
+  <div class="seg"><span class="k">running</span><span class="v b" id="f-run">0</span></div>
+  <div class="seg"><span class="k">findings</span><span class="v" id="f-find">0</span></div>
+  <div id="log">ready</div>
+</footer>
+
+<div id="toast" role="alert" aria-live="assertive"></div>
+
+<script>
+"use strict";
+/* ================================================================== *
+ *  cascade GUI - vanilla JS, no deps. EventSource-driven DAG cascade. *
+ *                                                                     *
+ *  XSS invariant: every network-derived string reaches the DOM only  *
+ *  through el(tag, cls, TEXT) which sets .textContent, never via      *
+ *  innerHTML. innerHTML is never used; clears go through clear().     *
+ *  A <script> payload in a Whois value renders as literal inert text. *
+ * ================================================================== */
+(function(){
+
+  // -------- tiny DOM + safety helpers --------
+  const $  = (s,r)=> (r||document).querySelector(s);
+  const el = (t,c,txt)=>{const e=document.createElement(t); if(c)e.className=c; if(txt!=null)e.textContent=txt; return e;};
+  const svgEl = t => document.createElementNS("http://www.w3.org/2000/svg",t);
+  function safeJSON(str, fb){ try{ return JSON.parse(str); }catch(_){ return fb; } }
+  function clear(node){ while(node.firstChild) node.removeChild(node.firstChild); }
+
+  // -------- key metadata (display + ordering) --------
+  const KEY_LABEL = {
+    domain:"domain", ipv4:"IPv4", ipv6:"IPv6", hostname:"hostname",
+    asn:"ASN", org:"org", mac:"MAC", email:"email",
+    mx_host:"mx_host", ns_host:"ns_host", abuse_email:"abuse", cidr:"cidr",
+    registrant_email:"registrant"
+  };
+  // Column / snapshot ordering by data-key (seed first, then derivation depth).
+  const COL_ORDER = [
+    "domain","ipv4","ipv6","hostname","asn","org",
+    "mx_host","ns_host","registrant_email","email","mac","abuse_email","cidr"
+  ];
+  const keyRank = k => { const i = COL_ORDER.indexOf(k); return i<0?99:i; };
+
+  // -------- category bucketing (graft from C3) ---------------------
+  // Normalized fuzzy rule table - matches BOTH the Go type name and the
+  // human label. Verified against all 30 tools: none fall to Other.
+  const CATEGORIES = ["DNS","Whois","Network","Email","Geo","Firewall","Other"];
+  const CAT_RULES = [
+    {cat:"Firewall", re:/firewall|chinese|iranian|censor/},
+    {cat:"Email",    re:/\b(mx|spf|dmarc|email|spam|blacklist|mail)\b|mxlookup|spamdatabase|emailblacklist|freeemail/},
+    {cat:"Whois",    re:/whois|abuse|registrant|registrar/},
+    {cat:"Geo",      re:/location|geo|asn|country|iplocation/},
+    {cat:"DNS",      re:/\bdns\b|\bns\b|\bsoa\b|dnssec|propagation|nslookup|soalookup|recordlookup|reversedns|sharednsservers/},
+    {cat:"Network",  re:/port|scan|http|header|ping|trace|route|proxy|reverseip|iphistory|hostnametoip|iptohostname/},
+    {cat:"Network",  re:/\bmac\b|macaddress|hardware/},
+  ];
+  function normalize(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+  function categorize(name){
+    const n = normalize(name);
+    const human = String(name||"").toLowerCase();
+    for(const r of CAT_RULES){ if(r.re.test(n) || r.re.test(human)) return r.cat; }
+    return "Other";
+  }
+
+  // -------- application state --------
+  const S = {
+    graph:[],                 // [{name,requires[],produces[]}]
+    nodeByName:new Map(),     // name -> graph node meta
+    catByName:new Map(),      // name -> category
+    elByName:new Map(),       // name -> {root, glyph, io, state} (column view)
+    dagByName:new Map(),      // name -> {root, glyph, state} (dag view)
+    consumersOfKey:new Map(), // key -> [toolName] that require it
+    producersOfKey:new Map(), // key -> [toolName] that produce it
+    keyNodeEl:new Map(),      // key -> {anchor, col} (column-view edge origin)
+    keyDagEl:new Map(),       // key -> {root, n} (dag-view diamond node)
+    edges:[],                 // column-view edges
+    edgeByPair:new Map(),     // "key|tool" -> edge (column view)
+    results:[],               // accumulated raw result events (for export)
+    haveKeys:new Set(),       // keys present in state (seed + produced)
+    counts:{done:0,err:0,run:0,find:0},
+    seedKeys:{},              // {key:[vals]}
+    finalState:null,          // authoritative state event payload
+    es:null,                  // EventSource
+    running:false,
+    reconnects:0,
+    selected:null,
+    curTarget:"",
+    view:"cols",              // "cols" | "dag"
+    railOpen:true,
+    catFilter:null,           // active category or null
+    textFilter:""             // substring filter
+  };
+
+  // -------- elements --------
+  const E = {
+    target:$("#target"), run:$("#run"), exp:$("#export"),
+    viewCols:$("#view-cols"), viewDag:$("#view-dag"),
+    railToggle:$("#rail-toggle"), rail:$("#rail"),
+    minimap:$("#minimap"), miniCount:$("#mini-count"), progBar:$("#prog-bar"),
+    cols:$("#columns"), dagview:$("#dagview"), edges:$("#edges"),
+    stage:$("#stage"), canvas:$("#canvas"),
+    results:$("#results"), rcount:$("#rcount"),
+    filter:$("#filter"), cats:$("#cats"),
+    snap:$("#snapshot"), snapBody:$("#snap-body"), snapCount:$("#snapcount"),
+    connDot:$("#conn-dot"), connTxt:$("#conn-txt"),
+    sTools:$("#s-tools"), sKeys:$("#s-keys"), sFired:$("#s-fired"),
+    sErr:$("#s-err"), sLit:$("#s-lit"),
+    fTarget:$("#f-target"), fDone:$("#f-done"), fErr:$("#f-err"),
+    fRun:$("#f-run"), fFind:$("#f-find"), log:$("#log"), toast:$("#toast")
+  };
+
+  function log(msg){ E.log.textContent = msg; }
+  let toastT=null;
+  function toast(msg){
+    E.toast.textContent = msg; E.toast.classList.add("show");
+    clearTimeout(toastT); toastT=setTimeout(()=>E.toast.classList.remove("show"),3600);
+  }
+  function setConn(state,txt){
+    E.connDot.className = "dot" + (state?(" "+state):"");
+    E.connTxt.textContent = txt;
+  }
+  function updFooter(){
+    E.fDone.textContent=S.counts.done; E.fErr.textContent=S.counts.err;
+    E.fRun.textContent=S.counts.run;   E.fFind.textContent=S.counts.find;
+    const n=S.results.length;
+    E.rcount.textContent = n+" tool"+(n===1?"":"s");
+  }
+  function updStats(){
+    E.sTools.textContent = S.graph.length;
+    E.sKeys.textContent  = countAllKeys();
+    E.sFired.textContent = S.counts.done;
+    E.sErr.textContent   = S.counts.err;
+    E.sLit.textContent   = S.haveKeys.size;
+  }
+  function countAllKeys(){
+    const set=new Set();
+    for(const n of S.graph){ n.requires.forEach(k=>set.add(k)); n.produces.forEach(k=>set.add(k)); }
+    return set.size;
+  }
+  function updProgress(){
+    const total=S.graph.length||1;
+    const fired=S.counts.done+S.counts.err;
+    E.progBar.style.right=(100-(fired/total*100))+"%";
+    E.miniCount.textContent=fired+" / "+(S.graph.length);
+  }
+
+  // ============================================================
+  //  GRAPH: fetch /graph and build views
+  // ============================================================
+  async function loadGraph(){
+    let data=null;
+    try{
+      const res = await fetch("/graph",{cache:"no-store"});
+      if(res.ok) data = await res.json();
+    }catch(_){ /* offline / dev: fall back to embedded DAG */ }
+    if(!Array.isArray(data) || !data.length) data = FALLBACK_GRAPH;
+    S.graph = data.filter(n=>n && typeof n.name==="string").map(n=>({
+      name:n.name,
+      requires:Array.isArray(n.requires)?n.requires:[],
+      produces:Array.isArray(n.produces)?n.produces:[]
+    }));
+    for(const n of S.graph) S.catByName.set(n.name, categorize(n.name));
+    indexGraph();
+    buildColumns(null);
+    buildDag(null);
+    buildMinimap();
+    buildCatChips();
+    updStats(); updProgress();
+  }
+
+  function indexGraph(){
+    S.nodeByName.clear(); S.consumersOfKey.clear(); S.producersOfKey.clear();
+    for(const n of S.graph){
+      S.nodeByName.set(n.name,n);
+      for(const k of n.requires){
+        if(!S.consumersOfKey.has(k)) S.consumersOfKey.set(k,[]);
+        S.consumersOfKey.get(k).push(n.name);
+      }
+      for(const k of n.produces){
+        if(!S.producersOfKey.has(k)) S.producersOfKey.set(k,[]);
+        S.producersOfKey.get(k).push(n.name);
+      }
+    }
+  }
+
+  // primary required key drives a tool's column placement
+  function primaryKey(node){ return node.requires.length ? node.requires[0] : "__seed__"; }
+
+  // ---- COLUMN VIEW -------------------------------------------------
+  function buildColumns(seedVals){
+    clear(E.cols);
+    S.elByName.clear(); S.keyNodeEl.clear();
+
+    // Column 0: SEED
+    const seedCol = el("div","col"); seedCol.style.minWidth="180px";
+    const sh = el("div","col-head"); sh.appendChild(el("span",null,"SEED"));
+    seedCol.appendChild(sh);
+    const seed = el("div","seed");
+    seed.appendChild(el("div","lbl","TARGET"));
+    const sval = el("div","val", S.curTarget || "-"); sval.id="seed-val";
+    seed.appendChild(sval);
+    const keysWrap = el("div","keys"); keysWrap.id="seed-keys";
+    seed.appendChild(keysWrap);
+    seedCol.appendChild(seed);
+    E.cols.appendChild(seedCol);
+    S.keyNodeEl.set("__seed__",{anchor:seed});
+
+    // group tools by primary required key
+    const byKey = new Map();
+    for(const n of S.graph){
+      const k = primaryKey(n);
+      if(!byKey.has(k)) byKey.set(k,[]);
+      byKey.get(k).push(n);
+    }
+    const presentKeys = [...byKey.keys()].filter(k=>k!=="__seed__");
+    presentKeys.sort((a,b)=>keyRank(a)-keyRank(b));
+
+    for(const key of presentKeys){
+      const col = el("div","col"); col.dataset.key=key;
+      const head = el("div","col-head");
+      head.appendChild(el("span",null,"NEEDS"));
+      head.appendChild(el("span","k", KEY_LABEL[key]||key));
+      head.appendChild(el("span","col-count", String(byKey.get(key).length)));
+      col.appendChild(head);
+      // header doubles as the anchor for edges that DELIVER this key
+      S.keyNodeEl.set(key,{anchor:head, col});
+
+      const tools = byKey.get(key).slice().sort((a,b)=>a.name.localeCompare(b.name));
+      for(const n of tools) col.appendChild(makeNode(n));
+      E.cols.appendChild(col);
+    }
+
+    renderSeedChips(seedVals);
+    requestAnimationFrame(()=>{ buildEdges(); });
+  }
+
+  function makeNode(n){
+    const node = el("div","node idle");
+    node.dataset.name = n.name;
+
+    const nm = el("div","nm");
+    nm.appendChild(el("span","glyph","○"));
+    nm.appendChild(el("span","txt", n.name));
+    node.appendChild(nm);
+
+    const io = el("div","io");
+    n.requires.forEach((k,i)=>{
+      if(i) io.appendChild(el("span","arrow","·"));
+      const c = el("span","chip req", KEY_LABEL[k]||k);
+      c.dataset.key=k; io.appendChild(c);
+    });
+    if(n.requires.length && n.produces.length) io.appendChild(el("span","arrow","→"));
+    n.produces.forEach((k,i)=>{
+      if(i) io.appendChild(el("span","arrow","·"));
+      const c = el("span","chip prod", KEY_LABEL[k]||k);
+      c.dataset.prod=k; io.appendChild(c);
+    });
+    node.appendChild(io);
+
+    node.addEventListener("click",()=>selectTool(n.name));
+    node.addEventListener("mouseenter",()=>hoverNeighborhood(n.name,true));
+    node.addEventListener("mouseleave",()=>hoverNeighborhood(n.name,false));
+    S.elByName.set(n.name,{root:node, glyph:nm.querySelector(".glyph"), io, state:"idle"});
+    return node;
+  }
+
+  function renderSeedChips(seedVals){
+    const wrap=$("#seed-keys"); if(!wrap) return;
+    clear(wrap);
+    const keys = seedVals ? Object.keys(seedVals).filter(k=>(seedVals[k]||[]).length) : [];
+    if(!keys.length){ wrap.appendChild(el("span","chip","awaiting seed")); return; }
+    for(const k of keys){
+      const vals=seedVals[k]||[];
+      const c=el("span","chip have", KEY_LABEL[k]||k);
+      if(vals.length>1){ c.appendChild(el("span","n","×"+vals.length)); }
+      c.title = (KEY_LABEL[k]||k)+": "+vals.join(", ");
+      wrap.appendChild(c);
+    }
+  }
+
+  // ---- BIPARTITE DAG VIEW (graft from C2) --------------------------
+  // Layered: keys and tools interleaved by derivation depth so multi-producer
+  // keys (e.g. ipv4 from DNS Record Lookup AND Hostname to IP) are visibly
+  // first-class diamond nodes that several tools both feed and consume.
+  function buildDag(seedVals){
+    clear(E.dagview);
+    S.dagByName.clear(); S.keyDagEl.clear();
+
+    const allKeys = new Set();
+    for(const n of S.graph){ n.requires.forEach(k=>allKeys.add(k)); n.produces.forEach(k=>allKeys.add(k)); }
+
+    // key depth via longest-path over the bipartite DAG (root keys = 0)
+    const keyDepth = new Map();
+    for(const k of allKeys) keyDepth.set(k, S.producersOfKey.has(k) ? null : 0);
+    let changed=true, guard=0;
+    while(changed && guard++<60){
+      changed=false;
+      for(const n of S.graph){
+        let td=0, ready=true;
+        for(const rk of n.requires){
+          const d=keyDepth.get(rk);
+          if(d==null){ ready=false; break; }
+          td=Math.max(td,d);
+        }
+        if(!ready) continue;
+        for(const pk of n.produces){
+          const cur=keyDepth.get(pk), want=td+1;
+          if(cur==null || want>cur){ keyDepth.set(pk,want); changed=true; }
+        }
+      }
+    }
+    for(const k of allKeys) if(keyDepth.get(k)==null) keyDepth.set(k,0); // cyclic / orphan -> 0
+
+    // tool depth = max required key depth (0 if no requires)
+    const toolDepth=new Map(); let maxTD=0;
+    for(const n of S.graph){
+      let td=0;
+      for(const rk of n.requires){ td=Math.max(td, keyDepth.get(rk)||0); }
+      toolDepth.set(n.name, td); maxTD=Math.max(maxTD, td);
+    }
+    const maxKeyDepth = Math.max(0, ...[...keyDepth.values()]);
+
+    const wrap = el("div","dag-cols");
+    function keyCol(depth){
+      const ks=[...allKeys].filter(k=>(keyDepth.get(k)||0)===depth).sort((a,b)=>keyRank(a)-keyRank(b));
+      if(!ks.length) return null;
+      const col=el("div","dag-col");
+      col.appendChild(el("div","dag-col-h","keys"));
+      for(const k of ks) col.appendChild(makeKeyNode(k));
+      return col;
+    }
+    function toolCol(depth){
+      const ts=S.graph.filter(n=>(toolDepth.get(n.name)||0)===depth).sort((a,b)=>a.name.localeCompare(b.name));
+      if(!ts.length) return null;
+      const col=el("div","dag-col");
+      col.appendChild(el("div","dag-col-h","tools"));
+      for(const n of ts) col.appendChild(makeDagTool(n));
+      return col;
+    }
+    const layers=Math.max(maxKeyDepth, maxTD)+1;
+    for(let d=0; d<=layers; d++){
+      const kc=keyCol(d); if(kc) wrap.appendChild(kc);
+      const tc=toolCol(d); if(tc) wrap.appendChild(tc);
+    }
+    E.dagview.appendChild(wrap);
+    renderDagKeyStates(seedVals);
+  }
+
+  function makeKeyNode(k){
+    const node=el("div","knode");
+    node.dataset.keynode=k;
+    node.appendChild(el("div","kn-l", KEY_LABEL[k]||k));
+    const n=el("div","kn-n","");
+    node.appendChild(n);
+    node.addEventListener("mouseenter",()=>hoverKeyNeighborhood(k,true));
+    node.addEventListener("mouseleave",()=>hoverKeyNeighborhood(k,false));
+    S.keyDagEl.set(k,{root:node, n});
+    return node;
+  }
+  function makeDagTool(n){
+    const node=el("div","tnode idle");
+    node.dataset.name=n.name;
+    const nm=el("div","tn-nm");
+    nm.appendChild(el("span","tn-g","○"));
+    nm.appendChild(el("span",null,n.name));
+    node.appendChild(nm);
+    node.addEventListener("click",()=>selectTool(n.name));
+    node.addEventListener("mouseenter",()=>hoverNeighborhood(n.name,true));
+    node.addEventListener("mouseleave",()=>hoverNeighborhood(n.name,false));
+    S.dagByName.set(n.name,{root:node, glyph:nm.querySelector(".tn-g"), state:"idle"});
+    return node;
+  }
+  function renderDagKeyStates(seedVals){
+    const seeded = seedVals ? new Set(Object.keys(seedVals).filter(k=>(seedVals[k]||[]).length)) : new Set();
+    for(const [k,obj] of S.keyDagEl){
+      obj.root.classList.remove("have","seeded");
+      if(seeded.has(k)) obj.root.classList.add("seeded");
+      else if(S.haveKeys.has(k)) obj.root.classList.add("have");
+    }
+  }
+
+  // ---- LEFT MINIMAP RAIL (graft from C3) ---------------------------
+  function buildMinimap(){
+    clear(E.minimap);
+    const tools=S.graph.slice().sort((a,b)=>a.name.localeCompare(b.name));
+    for(const n of tools){
+      const row=el("div","mini idle");
+      row.dataset.name=n.name;
+      row.appendChild(el("span","mg","○"));
+      row.appendChild(el("span","mn", n.name));
+      row.title=n.name+" - "+(S.catByName.get(n.name)||"Other");
+      row.addEventListener("click",()=>focusCard(n.name));
+      E.minimap.appendChild(row);
+    }
+  }
+
+  // ---- CATEGORY CHIPS (graft from C3) ------------------------------
+  function buildCatChips(){
+    clear(E.cats);
+    const all=el("div","cat active");
+    all.dataset.cat="__all__";
+    all.appendChild(el("span",null,"ALL"));
+    all.appendChild(el("span","cn","0"));
+    all.addEventListener("click",()=>setCatFilter(null));
+    E.cats.appendChild(all);
+    for(const c of CATEGORIES){
+      const chip=el("div","cat");
+      chip.dataset.cat=c;
+      chip.appendChild(el("span",null,c));
+      chip.appendChild(el("span","cn","0"));
+      chip.addEventListener("click",()=>setCatFilter(c));
+      E.cats.appendChild(chip);
+    }
+    refreshCatCounts();
+  }
+  function refreshCatCounts(){
+    const counts={__all__:S.results.length};
+    for(const c of CATEGORIES) counts[c]=0;
+    for(const r of S.results){
+      const c=S.catByName.get(r.tool)||categorize(r.tool);
+      counts[c]=(counts[c]||0)+1;
+    }
+    for(const chip of E.cats.children){
+      const c=chip.dataset.cat;
+      chip.querySelector(".cn").textContent=String(counts[c]||0);
+      chip.classList.toggle("empty", c!=="__all__" && (counts[c]||0)===0);
+    }
+  }
+  function setCatFilter(cat){
+    S.catFilter = cat;
+    for(const chip of E.cats.children){
+      const c=chip.dataset.cat;
+      chip.classList.toggle("active", (cat===null && c==="__all__") || c===cat);
+    }
+    applyFilters();
+  }
+  function applyFilters(){
+    const txt=S.textFilter.trim().toLowerCase();
+    let shown=0;
+    for(const card of E.results.querySelectorAll(".card")){
+      const tool=card.dataset.tool||"";
+      const cat=S.catByName.get(tool)||categorize(tool);
+      const hay=(card.dataset.hay||"").toLowerCase();
+      const okCat = !S.catFilter || cat===S.catFilter;
+      const okTxt = !txt || hay.indexOf(txt)>=0;
+      const show = okCat && okTxt;
+      card.classList.toggle("hidden", !show);
+      if(show) shown++;
+    }
+    for(const row of E.minimap.querySelectorAll(".mini")){
+      const tool=row.dataset.name||"";
+      const cat=S.catByName.get(tool)||categorize(tool);
+      const okCat = !S.catFilter || cat===S.catFilter;
+      const okTxt = !txt || tool.toLowerCase().indexOf(txt)>=0;
+      row.classList.toggle("hidden", !(okCat&&okTxt));
+    }
+    let nr=E.results.querySelector(".noresults");
+    const total=E.results.querySelectorAll(".card").length;
+    if(total>0 && shown===0){
+      if(!nr){ nr=el("div","noresults","No results match this filter."); E.results.appendChild(nr); }
+    } else if(nr){ nr.remove(); }
+  }
+
+  // ============================================================
+  //  COLUMN-VIEW EDGES (SVG bezier + traveling dot)
+  // ============================================================
+  function buildEdges(){
+    S.edges=[]; S.edgeByPair.clear();
+    clear(E.edges);
+    for(const n of S.graph){
+      const tEl = S.elByName.get(n.name); if(!tEl) continue;
+      n.requires.forEach((key,idx)=>{
+        const fromAnchor = S.keyNodeEl.get(key) || S.keyNodeEl.get("__seed__");
+        if(!fromAnchor) return;
+        const path = svgEl("path");
+        path.setAttribute("class","edge");
+        E.edges.appendChild(path);
+        const dot = svgEl("circle");
+        dot.setAttribute("class","edge-dot"); dot.setAttribute("r","3");
+        dot.style.opacity="0"; E.edges.appendChild(dot);
+        const edge = {key, to:n.name, fromAnchor:fromAnchor.anchor, toEl:tEl.root, path, dot, idx};
+        S.edges.push(edge);
+        S.edgeByPair.set(key+"|"+n.name, edge);
+      });
+    }
+    layoutEdges();
+  }
+
+  function anchorPoint(elem, side){
+    const cb = E.canvas.getBoundingClientRect();
+    const r = elem.getBoundingClientRect();
+    const x = side==="right" ? (r.right-cb.left) : (r.left-cb.left);
+    const y = r.top - cb.top + r.height/2;
+    return {x,y};
+  }
+
+  function layoutEdges(){
+    if(S.view!=="cols") return;
+    const w = E.canvas.scrollWidth, h = E.canvas.scrollHeight;
+    E.edges.setAttribute("width",w); E.edges.setAttribute("height",h);
+    E.edges.setAttribute("viewBox","0 0 "+w+" "+h);
+    for(const e of S.edges){
+      if(!e.fromAnchor.isConnected || !e.toEl.isConnected) continue;
+      const a = anchorPoint(e.fromAnchor,"right");
+      const b = anchorPoint(e.toEl,"left");
+      const dx = Math.max(40,(b.x-a.x)*0.5);
+      const d = "M "+a.x+" "+a.y+" C "+(a.x+dx)+" "+a.y+", "+(b.x-dx)+" "+b.y+", "+b.x+" "+b.y;
+      e.path.setAttribute("d",d);
+    }
+  }
+
+  // pulse all edges that carry a freshly-produced key into their consumers
+  function pulseKey(key){
+    if(S.view==="cols"){
+      for(const tool of (S.consumersOfKey.get(key)||[])){
+        const e = S.edgeByPair.get(key+"|"+tool); if(!e) continue;
+        e.path.classList.add("live");
+        animateDot(e);
+      }
+      const anchor = S.keyNodeEl.get(key);
+      if(anchor && anchor.anchor){
+        const kspan = anchor.anchor.querySelector(".k");
+        if(kspan){ kspan.style.color="var(--green)"; kspan.style.transition="color .4s"; }
+      }
+    }
+    const dk=S.keyDagEl.get(key);
+    if(dk){ dk.root.classList.remove("seeded"); dk.root.classList.add("have"); }
+  }
+  function armKeyEdges(key){
+    for(const tool of (S.consumersOfKey.get(key)||[])){
+      const e=S.edgeByPair.get(key+"|"+tool); if(e) e.path.classList.add("armed");
+    }
+  }
+
+  function animateDot(e){
+    if(!e.path.getTotalLength) return;
+    let len; try{ len=e.path.getTotalLength(); }catch(_){ return; }
+    if(!len) return;
+    const dot=e.dot; dot.style.opacity="1";
+    const dur=620; const t0=performance.now();
+    function frame(t){
+      const k=Math.min(1,(t-t0)/dur);
+      let p; try{ p=e.path.getPointAtLength(len*k); }catch(_){ dot.style.opacity="0"; return; }
+      dot.setAttribute("cx",p.x); dot.setAttribute("cy",p.y);
+      dot.style.opacity = String(1-k*0.7);
+      if(k<1) requestAnimationFrame(frame); else dot.style.opacity="0";
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // ============================================================
+  //  1-HOP HOVER NEIGHBORHOOD (graft from C2)
+  // ============================================================
+  function hoverNeighborhood(name, on){
+    const node=S.nodeByName.get(name); if(!node) return;
+    const keep=new Set([name]); const keepKeys=new Set();
+    node.requires.forEach(k=>{ keepKeys.add(k); (S.producersOfKey.get(k)||[]).forEach(t=>keep.add(t)); });
+    node.produces.forEach(k=>{ keepKeys.add(k); (S.consumersOfKey.get(k)||[]).forEach(t=>keep.add(t)); });
+    applyHover(on, keep, keepKeys, name, null);
+  }
+  function hoverKeyNeighborhood(key, on){
+    const keep=new Set(); const keepKeys=new Set([key]);
+    (S.producersOfKey.get(key)||[]).forEach(t=>keep.add(t));
+    (S.consumersOfKey.get(key)||[]).forEach(t=>keep.add(t));
+    applyHover(on, keep, keepKeys, null, key);
+  }
+  function applyHover(on, keepTools, keepKeys, hoverTool, hoverKey){
+    const active = S.view==="dag" ? S.dagByName : S.elByName;
+    for(const [nm,obj] of active){
+      obj.root.classList.toggle("dimmed", on && !keepTools.has(nm));
+      obj.root.classList.toggle("nbr", on && keepTools.has(nm) && nm!==hoverTool);
+    }
+    if(S.view==="dag"){
+      for(const [k,obj] of S.keyDagEl){
+        obj.root.classList.toggle("dimmed", on && !keepKeys.has(k));
+        obj.root.classList.toggle("nbr", on && keepKeys.has(k) && k!==hoverKey);
+      }
+    } else {
+      for(const e of S.edges){
+        const rel = keepKeys.has(e.key) && (keepTools.has(e.to) || e.to===hoverTool);
+        e.path.classList.toggle("dimmed", on && !rel);
+        e.path.classList.toggle("nbr", on && rel);
+      }
+    }
+  }
+
+  // ============================================================
+  //  NODE state transitions (both views + minimap in lockstep)
+  // ============================================================
+  const GLYPH = {idle:"○", running:"◐", done:"●", error:"✗", never:"·"};
+  function setNodeState(name,state){
+    const t=S.elByName.get(name);
+    if(t){
+      t.root.className = "node "+state;
+      t.glyph.textContent = GLYPH[state]||"○";
+      if(state==="done"||state==="error"){
+        t.root.classList.add("landed"); setTimeout(()=>t.root.classList.remove("landed"),600);
+      }
+      t.state=state;
+    }
+    const d=S.dagByName.get(name);
+    if(d){
+      d.root.className = "tnode "+state;
+      d.glyph.textContent = GLYPH[state]||"○";
+      if(state==="done"||state==="error"){
+        d.root.classList.add("landed"); setTimeout(()=>d.root.classList.remove("landed"),600);
+      }
+      d.state=state;
+    }
+    const m=E.minimap.querySelector('.mini[data-name="'+cssEsc(name)+'"]');
+    if(m){
+      m.className="mini "+state;
+      m.querySelector(".mg").textContent = GLYPH[state]||"○";
+    }
+  }
+  function cssEsc(s){ return String(s).replace(/["\\]/g,"\\$&"); }
+
+  // when keys become available, eligible idle tools flip to "running" wave-style
+  function markEligibleRunning(){
+    for(const n of S.graph){
+      const t=S.elByName.get(n.name);
+      const state = t ? t.state : (S.dagByName.get(n.name)||{}).state;
+      if(state==="done"||state==="error"||state==="running") continue;
+      const ready = n.requires.length===0 || n.requires.every(k=>S.haveKeys.has(k));
+      if(ready){ setNodeState(n.name,"running"); S.counts.run++; }
+    }
+    updFooter();
+  }
+
+  // ============================================================
+  //  RESULT CARDS
+  // ============================================================
+  function showOnboarding(){
+    clear(E.results);
+    const wrap=el("div","onboard");
+    wrap.appendChild(el("h2",null,"No run yet"));
+    const p=el("p");
+    p.appendChild(document.createTextNode("Seed one value. Every tool whose inputs are satisfied fires, its outputs feed downstream tools, and the cascade runs until nothing new can. Pick an example or type a "));
+    p.appendChild(el("b",null,"target"));
+    p.appendChild(document.createTextNode(" above, then press RUN."));
+    wrap.appendChild(p);
+
+    const pills=el("div","seed-pills");
+    const EXAMPLES=[
+      {tag:"domain", ex:"example.com"},
+      {tag:"IPv4",   ex:"8.8.8.8"},
+      {tag:"IPv6",   ex:"2606:4700:4700::1111"},
+      {tag:"email",  ex:"abuse@example.com"},
+      {tag:"MAC",    ex:"00:1a:2b:3c:4d:5e"}
+    ];
+    for(const ex of EXAMPLES){
+      const pill=el("button","pill");
+      pill.type="button";
+      pill.appendChild(el("span","tag", ex.tag));
+      pill.appendChild(el("span","ex", ex.ex));
+      pill.addEventListener("click",()=>{ E.target.value=ex.ex; startRun(); });
+      pills.appendChild(pill);
+    }
+    wrap.appendChild(pills);
+
+    const det=el("div","detect");
+    det.appendChild(el("div","dh","Target detection"));
+    const tbl=el("table");
+    const ROWS=[
+      ["net.ParseIP (v4)","ipv4","dotted-quad literal"],
+      ["net.ParseIP (v6)","ipv6","colon-hex literal"],
+      ["net.ParseMAC","mac","hardware address"],
+      ["contains @","email + domain","seeds both halves"],
+      ["else","domain","scheme + path stripped"]
+    ];
+    for(const r of ROWS){
+      const tr=el("tr");
+      tr.appendChild(el("td","rule",r[0]));
+      tr.appendChild(el("td","arr","→"));
+      tr.appendChild(el("td","key",r[1]));
+      tr.appendChild(el("td","desc",r[2]));
+      tbl.appendChild(tr);
+    }
+    det.appendChild(tbl);
+    wrap.appendChild(det);
+    E.results.appendChild(wrap);
+  }
+
+  function runningHint(){
+    clear(E.results);
+    const e=el("div","empty");
+    e.appendChild(el("b",null,"Cascade running..."));
+    e.appendChild(document.createElement("br"));
+    e.appendChild(document.createTextNode("results stream in as each tool completes."));
+    E.results.appendChild(e);
+  }
+
+  function valueClass(v){
+    const s=String(v).toLowerCase();
+    if(/listed|blocked|open|anomaly|reachable\b/.test(s) && !/not |no |clean|unreachable/.test(s)){
+      if(/open|reachable/.test(s)) return "ok";
+      return "bad";
+    }
+    if(/not configured|not enabled|none|no answer|timeout|unreachable|could not/.test(s)) return "warn";
+    if(/clean|accessible|success|enabled/.test(s)) return "ok";
+    return "";
+  }
+
+  // lowercase haystack of all text in a result for the substring filter
+  function buildHaystack(r){
+    const parts=[r.tool||""];
+    const walk=f=>{ if(!f) return; if(f.label!=null)parts.push(String(f.label)); if(f.value!=null)parts.push(String(f.value)); if(Array.isArray(f.sub))f.sub.forEach(walk); };
+    (r.findings||[]).forEach(walk);
+    if(r.error) parts.push(r.error);
+    Object.keys(r.produces||{}).forEach(k=>{ parts.push(k); (r.produces[k]||[]).forEach(v=>parts.push(String(v))); });
+    return parts.join(" ");
+  }
+
+  function renderFinding(parent,f){
+    const row=el("div","row");
+    row.appendChild(el("div","l", (f && f.label!=null)?String(f.label):""));
+    const v=el("div","v", (f && f.value!=null)?String(f.value):"");
+    const cls=valueClass(f && f.value); if(cls) v.classList.add(cls);
+    row.appendChild(v);
+    parent.appendChild(row);
+    if(f && Array.isArray(f.sub) && f.sub.length){
+      const sub=el("div","sub");
+      for(const s of f.sub) renderFinding(sub,s);
+      parent.appendChild(sub);
+    }
+  }
+
+  function addResultCard(r){
+    const isErr = !!(r.error && r.error.length);
+    const noFind = !isErr && (!r.findings || !r.findings.length);
+    const cat = S.catByName.get(r.tool) || categorize(r.tool);
+    const card = el("div","card "+(isErr?"error":(noFind?"empty-r":"done")));
+    card.dataset.tool = r.tool;
+    card.dataset.hay = buildHaystack(r);
+
+    const head=el("div","card-head");
+    head.appendChild(el("span","g", isErr?"✗":(noFind?"–":"●")));
+    head.appendChild(el("span","t", r.tool||"(tool)"));
+    head.appendChild(el("span","cat-tag", cat));
+    const fcount = (r.findings||[]).length;
+    head.appendChild(el("span","badge", isErr?"error":(fcount+" finding"+(fcount===1?"":"s"))));
+    head.appendChild(el("span","car","▾"));
+    head.addEventListener("click",()=>card.classList.toggle("collapsed"));
+    card.appendChild(head);
+
+    const body=el("div","card-body");
+    if(isErr){
+      body.appendChild(el("div","errmsg","✗ "+r.error));
+    } else if(noFind){
+      const row=el("div","row");
+      row.appendChild(el("div","l","result"));
+      row.appendChild(el("div","v warn","no findings"));
+      body.appendChild(row);
+    } else {
+      for(const f of r.findings) renderFinding(body,f);
+    }
+    const prod = r.produces && typeof r.produces==="object"
+      ? Object.keys(r.produces).filter(k=>(r.produces[k]||[]).length) : [];
+    if(prod.length){
+      const pl=el("div","prodline");
+      pl.appendChild(el("span","pk","produces"));
+      for(const k of prod){
+        const vals=r.produces[k]||[];
+        const c=el("span","chip have", KEY_LABEL[k]||k);
+        if(vals.length>1) c.appendChild(el("span","n","×"+vals.length));
+        c.title=(KEY_LABEL[k]||k)+" -> "+vals.join(", ");
+        pl.appendChild(c);
+      }
+      body.appendChild(pl);
+    }
+    card.appendChild(body);
+
+    card.addEventListener("mouseenter",()=>highlightTool(r.tool,true));
+    card.addEventListener("mouseleave",()=>highlightTool(r.tool,false));
+    E.results.appendChild(card);
+
+    // honor active filter for the freshly-added card
+    const txt=S.textFilter.trim().toLowerCase();
+    const okCat=!S.catFilter||cat===S.catFilter;
+    const okTxt=!txt||card.dataset.hay.toLowerCase().indexOf(txt)>=0;
+    if(okCat&&okTxt) card.scrollIntoView({block:"nearest",behavior:"smooth"});
+    else card.classList.add("hidden");
+  }
+
+  function highlightTool(name,on){
+    const t=S.elByName.get(name); if(t) t.root.classList.toggle("sel",on);
+    const d=S.dagByName.get(name); if(d) d.root.classList.toggle("sel",on);
+  }
+  function selectTool(name){
+    if(S.selected){
+      const p=S.elByName.get(S.selected); if(p)p.root.classList.remove("sel");
+      const pd=S.dagByName.get(S.selected); if(pd)pd.root.classList.remove("sel");
+    }
+    S.selected = name===S.selected ? null : name;
+    if(S.selected){
+      const t=S.elByName.get(S.selected); if(t)t.root.classList.add("sel");
+      const d=S.dagByName.get(S.selected); if(d)d.root.classList.add("sel");
+      focusCard(name);
+    }
+  }
+  // scroll to + flash a tool's result card (graft from C3)
+  function focusCard(name){
+    const card=[...E.results.querySelectorAll(".card")].find(c=>c.dataset.tool===name);
+    if(!card){ toast(name+" has not fired yet"); return; }
+    card.classList.remove("collapsed","hidden");
+    card.scrollIntoView({block:"center",behavior:"smooth"});
+    card.classList.remove("flash"); void card.offsetWidth; card.classList.add("flash");
+    setTimeout(()=>card.classList.remove("flash"),1200);
+  }
+
+  // ============================================================
+  //  STATE SNAPSHOT (bottom drawer, +N more truncation)
+  // ============================================================
+  const SNAP_LIMIT=8;
+  function renderSnapshot(state){
+    clear(E.snapBody);
+    const keys=Object.keys(state||{}).filter(k=>(state[k]||[]).length);
+    if(!keys.length){ E.snap.classList.remove("show"); return; }
+    keys.sort((a,b)=>keyRank(a)-keyRank(b));
+    let total=0;
+    for(const k of keys){
+      const vals=state[k]||[];
+      total+=vals.length;
+      const grp=el("div","snap-grp");
+      const gk=el("div","gk");
+      gk.appendChild(el("span",null,KEY_LABEL[k]||k));
+      gk.appendChild(el("span","n","("+vals.length+")"));
+      grp.appendChild(gk);
+      const vw=el("div","snap-vals");
+      for(const v of vals.slice(0,SNAP_LIMIT)){ const s=el("span","sv",String(v)); s.title=String(v); vw.appendChild(s); }
+      if(vals.length>SNAP_LIMIT){
+        const more=el("span","sv more","+"+(vals.length-SNAP_LIMIT)+" more");
+        more.title=vals.slice(SNAP_LIMIT).join(", ");
+        vw.appendChild(more);
+      }
+      grp.appendChild(vw);
+      E.snapBody.appendChild(grp);
+    }
+    E.snapCount.textContent = keys.length+" keys / "+total+" values";
+    E.snap.classList.add("show");
+  }
+
+  // ============================================================
+  //  SSE EVENT HANDLING
+  // ============================================================
+  function handleSeed(payload){
+    S.seedKeys = (payload && typeof payload==="object") ? payload : {};
+    for(const k of Object.keys(S.seedKeys)){
+      if((S.seedKeys[k]||[]).length){ S.haveKeys.add(k); }
+    }
+    renderSeedChips(S.seedKeys);
+    renderDagKeyStates(S.seedKeys);
+    for(const k of S.haveKeys){ armKeyEdges(k); }
+    markEligibleRunning();
+    requestAnimationFrame(()=>{ layoutEdges(); for(const k of S.haveKeys) pulseKey(k); });
+    updStats();
+    log("seed: "+Object.keys(S.seedKeys).join(", "));
+  }
+
+  function handleResult(payload){
+    if(!payload || typeof payload!=="object") return;
+    const r = {
+      tool: typeof payload.tool==="string"?payload.tool:"(unknown)",
+      findings: Array.isArray(payload.findings)?payload.findings:[],
+      produces: (payload.produces && typeof payload.produces==="object")?payload.produces:{},
+      error: typeof payload.error==="string"?payload.error:""
+    };
+    S.results.push(r);
+    if(!S.catByName.has(r.tool)) S.catByName.set(r.tool, categorize(r.tool));
+
+    const known = S.elByName.has(r.tool) || S.dagByName.has(r.tool);
+    const st = (S.elByName.get(r.tool)||S.dagByName.get(r.tool)||{}).state;
+    if(known && st==="running"){ S.counts.run=Math.max(0,S.counts.run-1); }
+
+    if(r.error){
+      if(known) setNodeState(r.tool,"error");
+      S.counts.err++;
+    } else {
+      if(known) setNodeState(r.tool,"done");
+      S.counts.done++;
+      S.counts.find += r.findings.length;
+    }
+
+    // drop any transient hint (running / onboarding)
+    const hint=E.results.querySelector(".empty,.onboard"); if(hint) hint.remove();
+    addResultCard(r);
+    refreshCatCounts();
+
+    const newlyHave=[];
+    for(const k of Object.keys(r.produces)){
+      if((r.produces[k]||[]).length){ if(!S.haveKeys.has(k)) newlyHave.push(k); S.haveKeys.add(k); }
+    }
+    if(newlyHave.length){
+      requestAnimationFrame(()=>{ layoutEdges(); for(const k of newlyHave){ pulseKey(k); } });
+      markEligibleRunning();
+    }
+    updFooter(); updStats(); updProgress();
+  }
+
+  function handleState(payload){
+    S.finalState = (payload && typeof payload==="object") ? payload : {};
+    renderSnapshot(S.finalState);
+    for(const k of Object.keys(S.finalState)){
+      if((S.finalState[k]||[]).length){ S.haveKeys.add(k); pulseKey(k); }
+    }
+    updStats();
+    log("state snapshot received");
+  }
+
+  function handleDone(){
+    finishRun(false);
+    log("cascade complete - "+S.counts.done+" done, "+S.counts.err+" error, "+S.counts.find+" findings");
+  }
+
+  // ============================================================
+  //  RUN LIFECYCLE
+  // ============================================================
+  function resetForRun(target){
+    closeStream();
+    S.results=[]; S.haveKeys=new Set(); S.seedKeys={}; S.finalState=null;
+    S.counts={done:0,err:0,run:0,find:0};
+    S.selected=null; S.reconnects=0; S.curTarget=target;
+    S.textFilter=""; E.filter.value="";
+    runningHint();
+    E.snap.classList.remove("show"); clear(E.snapBody);
+    E.fTarget.textContent=target;
+    const sv=$("#seed-val"); if(sv) sv.textContent=target;
+    for(const name of S.nodeByName.keys()){ setNodeState(name,"idle"); }
+    for(const e of S.edges){ e.path.classList.remove("live","armed","dimmed","nbr"); e.dot.style.opacity="0"; }
+    for(const [,a] of S.keyNodeEl){ if(a.anchor){ const k=a.anchor.querySelector(".k"); if(k)k.style.color=""; } }
+    for(const [,obj] of S.keyDagEl){ obj.root.classList.remove("have","seeded"); }
+    renderSeedChips(null);
+    setCatFilter(null);
+    updFooter(); updStats(); updProgress();
+  }
+
+  function startRun(){
+    const target = E.target.value.trim();
+    if(!target){ E.target.focus(); toast("enter a target first"); return; }
+    if(!window.EventSource){ toast("EventSource not supported in this webview"); return; }
+    resetForRun(target);
+    S.running=true;
+    setRunButton(true);
+    E.exp.disabled=true;
+    setConn("run","connecting");
+    log("GET /run?target="+target);
+    openStream(target);
+  }
+
+  function setRunButton(running){
+    E.run.textContent = running ? "STOP" : "RUN";
+    E.run.className   = running ? "btn btn-stop" : "btn btn-run";
+    E.run.disabled    = false;
+  }
+  function stopRun(){
+    if(!S.running) return;
+    log("run stopped by operator");
+    closeStream();
+    finishRun(true);
+    setConn("err","stopped");
+  }
+
+  function openStream(target){
+    let es;
+    try{ es = new EventSource("/run?target="+encodeURIComponent(target)); }
+    catch(_){ toast("failed to open stream"); finishRun(true); return; }
+    S.es = es;
+
+    es.addEventListener("open",()=>{ setConn("run","streaming"); S.reconnects=0; });
+
+    es.addEventListener("seed",  ev=> safe(()=>handleSeed (safeJSON(ev.data,{}))));
+    es.addEventListener("result",ev=> safe(()=>handleResult(safeJSON(ev.data,{}))));
+    es.addEventListener("state", ev=> safe(()=>handleState (safeJSON(ev.data,{}))));
+    es.addEventListener("done",  ()=> safe(()=>{ handleDone(); closeStream(); }));
+    // tolerate servers that send unnamed "message" events carrying a result
+    es.addEventListener("message",ev=> safe(()=>{
+      const d=safeJSON(ev.data,null); if(d && d.tool) handleResult(d);
+    }));
+
+    es.addEventListener("error",()=>{
+      if(!S.running) return; // already finished / stopped: ignore the close
+      if(es.readyState===EventSource.CLOSED){
+        // a real CLOSED-without-done drop, distinct from clean post-done close
+        setConn("err","stream closed");
+        log("stream closed by server before done");
+        finishRun(true);
+      } else {
+        S.reconnects++;
+        setConn("err","reconnecting ("+S.reconnects+")");
+        log("connection dropped - EventSource reconnecting");
+        if(S.reconnects>=6){ closeStream(); setConn("err","gave up reconnecting"); finishRun(true); }
+      }
+    });
+  }
+
+  function safe(fn){ try{ fn(); }catch(err){ log("handler error: "+(err&&err.message)); } }
+  function closeStream(){ if(S.es){ try{S.es.close();}catch(_){ } S.es=null; } }
+
+  function finishRun(viaError){
+    if(!S.running && !viaError) return;
+    S.running=false;
+    closeStream();
+    // still-running -> idle; never-eligible idle -> dimmed "never fired"
+    for(const name of S.nodeByName.keys()){
+      const st=(S.elByName.get(name)||S.dagByName.get(name)||{}).state;
+      if(st==="running"){ setNodeState(name,"idle"); }
+      else if(st==="idle"||st===undefined){ setNodeState(name,"never"); }
+    }
+    S.counts.run=0; updFooter(); updStats(); updProgress();
+    setRunButton(false);
+    E.exp.disabled = S.results.length===0;
+    if(!viaError) setConn("live","done");
+    // results-area fallback messaging
+    const transient=E.results.querySelector(".empty");
+    if(S.results.length){ if(transient) transient.remove(); }
+    else if(transient){
+      clear(transient);
+      transient.appendChild(el("b",null,"No results."));
+      transient.appendChild(document.createElement("br"));
+      transient.appendChild(document.createTextNode(viaError
+        ? "The stream closed before any tool completed."
+        : "No tool produced output for this target."));
+    }
+  }
+
+  // ============================================================
+  //  VIEW TOGGLE  (columns <-> bipartite DAG)
+  // ============================================================
+  function setView(v){
+    S.view=v;
+    E.viewCols.classList.toggle("active", v==="cols");
+    E.viewDag.classList.toggle("active", v==="dag");
+    E.viewCols.setAttribute("aria-pressed", v==="cols");
+    E.viewDag.setAttribute("aria-pressed", v==="dag");
+    const isDag = v==="dag";
+    E.stage.classList.toggle("dag", isDag);
+    E.dagview.classList.toggle("show", isDag);
+    E.edges.style.display = isDag ? "none" : "";
+    if(!isDag) requestAnimationFrame(layoutEdges);
+  }
+
+  // ============================================================
+  //  RAIL toggle
+  // ============================================================
+  function toggleRail(){
+    S.railOpen=!S.railOpen;
+    E.rail.classList.toggle("collapsed", !S.railOpen);
+    E.railToggle.classList.toggle("on", S.railOpen);
+    E.railToggle.setAttribute("aria-pressed", String(S.railOpen));
+    requestAnimationFrame(layoutEdges);
+  }
+
+  // ============================================================
+  //  EXPORT JSON (prefers authoritative state event)
+  // ============================================================
+  function exportJSON(){
+    if(!S.results.length){ toast("nothing to export yet"); return; }
+    const payload = {
+      tool:"cascade",
+      target:S.curTarget,
+      generated:new Date().toISOString(),
+      seed:S.seedKeys,
+      results:S.results,
+      state:S.finalState || collectState(),
+      summary:{
+        tools:S.results.length, done:S.counts.done,
+        errors:S.counts.err, findings:S.counts.find
+      }
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    const slug=(S.curTarget||"target").replace(/[^a-z0-9.\-_@]/gi,"_").slice(0,60);
+    a.href=url; a.download="cascade-"+slug+".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+    log("exported "+a.download);
+  }
+  // fallback state reconstruction if no authoritative state event arrived
+  function collectState(){
+    const out={};
+    for(const k of Object.keys(S.seedKeys)){ out[k]=(S.seedKeys[k]||[]).slice(); }
+    for(const r of S.results){
+      for(const k of Object.keys(r.produces||{})){
+        const vals=r.produces[k]||[];
+        if(!out[k]) out[k]=[];
+        for(const v of vals){ if(out[k].indexOf(v)<0) out[k].push(v); }
+      }
+    }
+    return out;
+  }
+
+  // ============================================================
+  //  WIRING
+  // ============================================================
+  E.run.addEventListener("click",()=>{ if(S.running) stopRun(); else startRun(); });
+  E.exp.addEventListener("click",exportJSON);
+  E.target.addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); if(!S.running) startRun(); } });
+  E.viewCols.addEventListener("click",()=>setView("cols"));
+  E.viewDag.addEventListener("click",()=>setView("dag"));
+  E.railToggle.addEventListener("click",toggleRail);
+  E.filter.addEventListener("input",()=>{ S.textFilter=E.filter.value; applyFilters(); });
+
+  // relayout edges on resize/scroll (throttled via rAF) + ResizeObserver
+  let raf=null;
+  function scheduleLayout(){ if(raf) return; raf=requestAnimationFrame(()=>{ raf=null; layoutEdges(); }); }
+  window.addEventListener("resize",scheduleLayout);
+  E.stage.addEventListener("scroll",scheduleLayout,{passive:true});
+  if(window.ResizeObserver){
+    try{ new ResizeObserver(scheduleLayout).observe(E.stage); }catch(_){}
+  }
+
+  // keyboard shortcuts
+  document.addEventListener("keydown",e=>{
+    const typing = document.activeElement===E.target || document.activeElement===E.filter;
+    if(e.key==="/" && !typing){ e.preventDefault(); E.target.focus(); E.target.select(); }
+    else if(e.key==="Escape"){
+      if(S.running){ stopRun(); }
+      else if(S.selected){ selectTool(S.selected); }
+    }
+    else if((e.key==="g"||e.key==="G") && !typing){ e.preventDefault(); setView(S.view==="cols"?"dag":"cols"); }
+  });
+
+  window.addEventListener("error",e=>{ log("err: "+(e.message||"unknown")); });
+  window.addEventListener("beforeunload",closeStream);
+
+  // ============================================================
+  //  FALLBACK GRAPH (offline / dev) - mirrors the Go DAG exactly.
+  //  Each entry mirrors a tool's Requires()/Produces() (what /graph
+  //  reports). Note: Hostname to IP's Produces() declares ipv4 only,
+  //  though Run also appends ipv6 - the graph endpoint reflects
+  //  Produces(), so this mirrors that. Used ONLY if /graph is down.
+  // ============================================================
+  const FALLBACK_GRAPH = [
+    {name:"DNS Record Lookup",requires:["domain"],produces:["ipv4","ipv6"]},
+    {name:"MX Lookup",requires:["domain"],produces:["mx_host"]},
+    {name:"NS Lookup",requires:["domain"],produces:["ns_host"]},
+    {name:"SOA Lookup",requires:["domain"],produces:[]},
+    {name:"SPF Lookup",requires:["domain"],produces:[]},
+    {name:"DMARC Lookup",requires:["domain"],produces:[]},
+    {name:"DNSSEC Lookup",requires:["domain"],produces:[]},
+    {name:"DNS Propagation Checker",requires:["domain"],produces:[]},
+    {name:"Reverse DNS Lookup",requires:["ipv4"],produces:["hostname"]},
+    {name:"Hostname to IP",requires:["hostname"],produces:["ipv4"]},
+    {name:"IP to Hostname",requires:["ipv6"],produces:["hostname"]},
+    {name:"IP Location Finder",requires:["ipv4"],produces:["asn","org"]},
+    {name:"ASN Lookup",requires:["asn"],produces:[]},
+    {name:"Whois Lookup",requires:["domain"],produces:["org"]},
+    {name:"Abuse Contact Lookup",requires:["ipv4"],produces:["abuse_email"]},
+    {name:"Reverse Whois Lookup",requires:["registrant_email"],produces:[]},
+    {name:"Port Scanner",requires:["ipv4"],produces:[]},
+    {name:"HTTP Headers",requires:["domain"],produces:[]},
+    {name:"Ping",requires:["ipv4"],produces:[]},
+    {name:"Traceroute",requires:["domain"],produces:[]},
+    {name:"Reverse IP Lookup",requires:["ipv4"],produces:[]},
+    {name:"Find Shared DNS Servers",requires:["ns_host"],produces:[]},
+    {name:"IP History",requires:["domain"],produces:[]},
+    {name:"Proxy Checker",requires:["ipv4"],produces:[]},
+    {name:"Email Blacklist Check",requires:["ipv4"],produces:[]},
+    {name:"Spam Database Lookup",requires:["mx_host"],produces:[]},
+    {name:"Free Email Lookup",requires:["email"],produces:[]},
+    {name:"Chinese Firewall Test",requires:["domain"],produces:[]},
+    {name:"Iranian Internet Firewall Test",requires:["domain"],produces:[]},
+    {name:"MAC Address Lookup",requires:["mac"],produces:[]}
+  ];
+
+  // boot
+  showOnboarding();
+  loadGraph();
+  setConn("","idle");
+  setView("cols");
+  E.target.focus();
+
+})();
+</script>
+</body>
+</html>
