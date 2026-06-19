@@ -11,12 +11,12 @@ import (
 )
 
 var (
-	header  = color.New(color.FgCyan, color.Bold)
-	label   = color.New(color.FgWhite, color.Bold)
-	value   = color.New(color.FgWhite)
-	errClr  = color.New(color.FgRed)
-	dimClr  = color.New(color.FgHiBlack)
-	banner  = color.New(color.FgMagenta, color.Bold)
+	header = color.New(color.FgCyan, color.Bold)
+	label  = color.New(color.FgWhite, color.Bold)
+	value  = color.New(color.FgWhite)
+	errClr = color.New(color.FgRed)
+	dimClr = color.New(color.FgHiBlack)
+	banner = color.New(color.FgMagenta, color.Bold)
 )
 
 func Banner(target string) {

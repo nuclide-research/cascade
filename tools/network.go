@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,7 +38,7 @@ func (t *PortScanner) Run(state *engine.State) (*engine.Result, error) {
 
 	for _, port := range commonPorts {
 		go func(p int) {
-			addr := fmt.Sprintf("%s:%d", ip, p)
+			addr := net.JoinHostPort(ip, strconv.Itoa(p))
 			conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
 			if err == nil {
 				conn.Close()
@@ -121,7 +122,7 @@ func (t *Ping) Run(state *engine.State) (*engine.Result, error) {
 	// TCP ping on port 80 and 443 - no root required
 	for _, port := range []int{80, 443} {
 		start := time.Now()
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, port), 3*time.Second)
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(port)), 3*time.Second)
 		elapsed := time.Since(start)
 		if err == nil {
 			conn.Close()
@@ -319,7 +320,7 @@ func (t *ProxyChecker) Run(state *engine.State) (*engine.Result, error) {
 
 	found := false
 	for _, pp := range proxyPorts {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, pp.port), 2*time.Second)
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(pp.port)), 2*time.Second)
 		if err == nil {
 			conn.Close()
 			r.Findings = append(r.Findings, engine.Finding{

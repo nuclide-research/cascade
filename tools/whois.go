@@ -19,14 +19,14 @@ func whoisServer(domain string) string {
 	}
 	tld := parts[len(parts)-1]
 	servers := map[string]string{
-		"com": "whois.verisign-grs.com",
-		"net": "whois.verisign-grs.com",
-		"org": "whois.pir.org",
-		"io":  "whois.nic.io",
-		"co":  "whois.nic.co",
-		"us":  "whois.nic.us",
-		"uk":  "whois.nic.uk",
-		"de":  "whois.denic.de",
+		"com":  "whois.verisign-grs.com",
+		"net":  "whois.verisign-grs.com",
+		"org":  "whois.pir.org",
+		"io":   "whois.nic.io",
+		"co":   "whois.nic.co",
+		"us":   "whois.nic.us",
+		"uk":   "whois.nic.uk",
+		"de":   "whois.denic.de",
 		"info": "whois.afilias.net",
 		"biz":  "whois.biz",
 		"ai":   "whois.nic.ai",

@@ -13,11 +13,11 @@ type runKey struct {
 
 // Engine resolves and executes the DAG of tools.
 type Engine struct {
-	state   *State
-	nodes   []Node
-	ran     map[runKey]bool
-	results []*Result
-	mu      sync.Mutex
+	state    *State
+	nodes    []Node
+	ran      map[runKey]bool
+	results  []*Result
+	mu       sync.Mutex
 	OnResult func(*Result)
 }
 

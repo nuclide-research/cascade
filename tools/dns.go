@@ -44,7 +44,7 @@ func queryDNS(host, qtype string, server string) (*dns.Msg, error) {
 
 type DNSRecordLookup struct{}
 
-func (t *DNSRecordLookup) Name() string           { return "DNS Record Lookup" }
+func (t *DNSRecordLookup) Name() string               { return "DNS Record Lookup" }
 func (t *DNSRecordLookup) Requires() []engine.DataKey { return []engine.DataKey{engine.KeyDomain} }
 func (t *DNSRecordLookup) Produces() []engine.DataKey {
 	return []engine.DataKey{engine.KeyIPv4, engine.KeyIPv6}

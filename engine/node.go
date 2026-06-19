@@ -4,18 +4,18 @@ package engine
 type DataKey string
 
 const (
-	KeyIPv4     DataKey = "ipv4"
-	KeyIPv6     DataKey = "ipv6"
-	KeyDomain   DataKey = "domain"
-	KeyHostname DataKey = "hostname"
-	KeyASN      DataKey = "asn"
-	KeyOrg      DataKey = "org"
-	KeyMAC      DataKey = "mac"
-	KeyEmail    DataKey = "email"
-	KeyMXHost   DataKey = "mx_host"
-	KeyNSHost   DataKey = "ns_host"
-	KeyAbuse    DataKey = "abuse_email"
-	KeyCIDR     DataKey = "cidr"
+	KeyIPv4            DataKey = "ipv4"
+	KeyIPv6            DataKey = "ipv6"
+	KeyDomain          DataKey = "domain"
+	KeyHostname        DataKey = "hostname"
+	KeyASN             DataKey = "asn"
+	KeyOrg             DataKey = "org"
+	KeyMAC             DataKey = "mac"
+	KeyEmail           DataKey = "email"
+	KeyMXHost          DataKey = "mx_host"
+	KeyNSHost          DataKey = "ns_host"
+	KeyAbuse           DataKey = "abuse_email"
+	KeyCIDR            DataKey = "cidr"
 	KeyRegistrantEmail DataKey = "registrant_email"
 )
 
