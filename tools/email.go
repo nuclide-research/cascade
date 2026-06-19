@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/miekg/dns"
@@ -23,8 +24,23 @@ var rblList = []struct {
 	{"truncate.gbudb.net", "GBUdb"},
 }
 
+// reverseIP returns the reversed-octet label used to query DNS blacklists,
+// e.g. "1.2.3.4" -> "4.3.2.1". DNSBLs are keyed on IPv4 only, so the input must
+// be a real dotted-quad: parsing rejects IPv6 (incl. the ::ffff:a.b.c.d mapped
+// form) and any string that merely happens to contain three dots. Returns ""
+// when the input is not a valid IPv4 address, which callers treat as "skip".
 func reverseIP(ip string) string {
-	parts := strings.Split(ip, ".")
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return ""
+	}
+	v4 := parsed.To4()
+	if v4 == nil {
+		return ""
+	}
+	// Reconstruct from the canonical 4-byte form so non-canonical spellings
+	// (leading zeros, mapped form) never reach the RBL query.
+	parts := strings.Split(v4.String(), ".")
 	if len(parts) != 4 {
 		return ""
 	}

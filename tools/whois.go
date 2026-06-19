@@ -74,7 +74,13 @@ type WhoisLookup struct{}
 
 func (t *WhoisLookup) Name() string               { return "Whois Lookup" }
 func (t *WhoisLookup) Requires() []engine.DataKey { return []engine.DataKey{engine.KeyDomain} }
-func (t *WhoisLookup) Produces() []engine.DataKey { return []engine.DataKey{engine.KeyOrg} }
+
+// Produces must list every key Run can write to state, or the GUI dependency
+// graph mis-draws edges. Run emits KeyOrg (Registrant Organization) AND
+// KeyRegistrantEmail (the input ReverseWhoisLookup requires); both belong here.
+func (t *WhoisLookup) Produces() []engine.DataKey {
+	return []engine.DataKey{engine.KeyOrg, engine.KeyRegistrantEmail}
+}
 
 func (t *WhoisLookup) Run(state *engine.State) (*engine.Result, error) {
 	domain := state.First(engine.KeyDomain)

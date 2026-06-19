@@ -2,13 +2,15 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
-// runKey deduplicates tool runs per unique input set.
+// runKey deduplicates tool runs per unique input set: a tool fires at most once
+// for each distinct combination of its required input values.
 type runKey struct {
 	tool  string
-	input string // first required key value at run time
+	input string // all required key values at run time, joined (see inputKey)
 }
 
 // Engine resolves and executes the DAG of tools.
@@ -114,10 +116,21 @@ func (e *Engine) canRun(node Node) bool {
 	return true
 }
 
+// inputKey builds the dedup signature from EVERY required key's current first
+// value, not just the first requirement. With one requirement (every tool today)
+// the result is identical to the old behavior; with two or more it keeps tools
+// with distinct second/third inputs from colliding into a single run.
 func (e *Engine) inputKey(node Node) string {
 	reqs := node.Requires()
 	if len(reqs) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s=%s", reqs[0], e.state.First(reqs[0]))
+	var b strings.Builder
+	for i, req := range reqs {
+		if i > 0 {
+			b.WriteByte('\x00') // unambiguous separator; cannot appear in values
+		}
+		fmt.Fprintf(&b, "%s=%s", req, e.state.First(req))
+	}
+	return b.String()
 }
