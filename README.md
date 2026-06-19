@@ -44,6 +44,8 @@ cascade gui
 
 Binds `127.0.0.1` on a free port, opens your browser, and serves the UI from the binary itself (assets embedded with `go:embed` — nothing to install, no external CDN). Type a target and watch the cascade propagate: the seed node fans data-keys out to the tools that consume them, and each tool animates idle → running → done/error as results stream into the panel on the right. Toggle between the layered **columns** view and a **graph** view, then export the whole run as JSON.
 
+The UI is **fully keyboard-navigable and screen-reader friendly**: a skip link, real labels, focusable nodes/rows/cards (Enter/Space to drill in), `aria-live` streaming regions, a real progress bar, and a dynamic page title that reports run progress. Status is encoded by **shape *and* color** (`○ ◐ ● ✗`), so it stays readable for color-blind users. If the connection drops mid-run, the UI says so and **keeps the partial results** rather than wiping them.
+
 ## Standalone window
 
 ```
@@ -114,6 +116,15 @@ go build -o cascade .
 GOOS=linux   go build -o cascade .
 GOOS=windows go build -o cascade.exe .
 ```
+
+## Tests
+
+```
+go test ./...          # engine DAG/state, seed detection, tool parsing, registry fitness
+go test -race ./...    # race-clean under the detector
+```
+
+The suite covers the load-bearing logic — the dependency-cascade engine, seed-type detection, the pure parsing in the tools, and a registry fitness check that fails if any tool requires a data key nothing produces.
 
 ## License
 
