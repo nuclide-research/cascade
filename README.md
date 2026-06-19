@@ -8,12 +8,13 @@ DNS/IP reconnaissance cascade. Seed one value — domain, IP, email, or MAC — 
 go install github.com/nuclide-research/cascade@latest
 ```
 
-## Two interfaces, one engine
+## Three ways to run it, one engine
 
 - **CLI** — `cascade <target>`, streamed to the terminal, `-j` for JSON.
-- **GUI** — `cascade gui`, a live dependency-DAG in the browser, streamed over Server-Sent Events.
+- **GUI** — `cascade gui`, the live dependency-DAG in your browser over Server-Sent Events.
+- **App** — `cascade app`, the same UI in a standalone, frameless window (no tabs, no address bar).
 
-Both share the same 30-tool registry and cascade engine. Pure Go, no CGo — builds for Linux and Windows with plain `go build`.
+All three share the same 30-tool registry and cascade engine. The default build is pure Go, no CGo — `go build` for Linux and Windows with nothing to install.
 
 ## How the cascade works
 
@@ -42,6 +43,28 @@ cascade gui
 ```
 
 Binds `127.0.0.1` on a free port, opens your browser, and serves the UI from the binary itself (assets embedded with `go:embed` — nothing to install, no external CDN). Type a target and watch the cascade propagate: the seed node fans data-keys out to the tools that consume them, and each tool animates idle → running → done/error as results stream into the panel on the right. Toggle between the layered **columns** view and a **graph** view, then export the whole run as JSON.
+
+## Standalone window
+
+```
+cascade app
+```
+
+Serves the same UI in a frameless desktop window instead of a browser tab. By default it opens an installed Chromium browser (Chrome / Edge / Brave / Chromium) in `--app=` mode with a throwaway profile — a standalone window with no tabs or address bar, and still a plain pure-Go build. If no Chromium browser is found it falls back to your default browser.
+
+For a **true native OS webview** window (no browser dependency), build with the `webview` tag:
+
+```
+# Linux (needs CGo + a system webview):
+sudo apt install libwebkit2gtk-4.1-dev
+CGO_ENABLED=1 go build -tags webview -o cascade .
+
+# Windows: the Edge WebView2 runtime ships with Win10/11; build on Windows
+#          (or cross-compile with a mingw toolchain):
+go build -tags webview -o cascade.exe .
+```
+
+This uses the OS webview (WebKitGTK on Linux, WebView2 on Windows, WKWebView on macOS) and renders the exact same UI. Note: on Ubuntu 24.04 only `webkit2gtk-4.1` is packaged while the upstream `webview_go` pin targets `webkit2gtk-4.0`, so a `pkg-config` shim mapping 4.0 → 4.1 may be required. The default (non-webview) build has none of these dependencies.
 
 ## Tools
 

@@ -23,13 +23,23 @@ func main() {
 
 	gui := &cobra.Command{
 		Use:   "gui",
-		Short: "Launch the web UI (binds 127.0.0.1 on a free port, opens browser)",
+		Short: "Launch the web UI in your browser (binds 127.0.0.1 on a free port)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return serveGUI()
 		},
 	}
 	root.AddCommand(gui)
+
+	app := &cobra.Command{
+		Use:   "app",
+		Short: "Launch the UI as a standalone window (frameless Chromium; -tags webview for native)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return nativeApp()
+		},
+	}
+	root.AddCommand(app)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

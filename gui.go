@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -45,14 +47,15 @@ type graphNode struct {
 
 // --- server wiring --------------------------------------------------------
 
-// serveGUI binds 127.0.0.1 on a free OS-assigned port, opens the default
-// browser, and blocks serving the recon UI until the process is killed.
-func serveGUI() error {
+// startServer binds 127.0.0.1 on a free OS-assigned port and serves the recon
+// UI from a background goroutine. It returns the URL and a channel that carries
+// the eventual server error, so callers can either block on it (browser modes)
+// or run a native UI on the main thread while the server runs (webview mode).
+func startServer() (string, <-chan error, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return fmt.Errorf("bind: %w", err)
+		return "", nil, fmt.Errorf("bind: %w", err)
 	}
-
 	addr := ln.Addr().(*net.TCPAddr)
 	url := fmt.Sprintf("http://127.0.0.1:%d/", addr.Port)
 
@@ -63,11 +66,35 @@ func serveGUI() error {
 	mux.HandleFunc("/graph", handleGraph)
 	mux.HandleFunc("/run", handleRun)
 
+	errc := make(chan error, 1)
+	go func() { errc <- (&http.Server{Handler: mux}).Serve(ln) }()
+	return url, errc, nil
+}
+
+// serveGUI serves the UI and opens it in the OS default browser, then blocks
+// until the server dies. This is the zero-dependency default.
+func serveGUI() error {
+	url, errc, err := startServer()
+	if err != nil {
+		return err
+	}
 	fmt.Printf("cascade gui » %s\n", url)
 	openBrowser(url) // best effort; UI works regardless
+	return <-errc
+}
 
-	srv := &http.Server{Handler: mux}
-	return srv.Serve(ln)
+// serveApp serves the UI in a frameless standalone window via an installed
+// Chromium-based browser (chrome/edge/brave/chromium) launched with --app=.
+// No new dependencies, still a plain `go build`. Falls back to the default
+// browser if no Chromium binary is found.
+func serveApp() error {
+	url, errc, err := startServer()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("cascade app » %s\n", url)
+	openAppWindow(url)
+	return <-errc
 }
 
 // handleIndex serves the embedded single-page UI.
@@ -283,4 +310,64 @@ func openBrowser(url string) {
 		cmd = exec.Command("xdg-open", url)
 	}
 	_ = cmd.Start()
+}
+
+// chromiumCandidates lists Chromium-based browser binaries per OS, in
+// preference order. --app= opens a frameless, tab-less, address-bar-less
+// window that reads as a native app.
+func chromiumCandidates() []string {
+	switch runtime.GOOS {
+	case "windows":
+		pf := os.Getenv("ProgramFiles")
+		pf86 := os.Getenv("ProgramFiles(x86)")
+		local := os.Getenv("LocalAppData")
+		return []string{
+			pf + `\Google\Chrome\Application\chrome.exe`,
+			pf86 + `\Google\Chrome\Application\chrome.exe`,
+			local + `\Google\Chrome\Application\chrome.exe`,
+			pf + `\Microsoft\Edge\Application\msedge.exe`,
+			pf86 + `\Microsoft\Edge\Application\msedge.exe`,
+		}
+	case "darwin":
+		return []string{
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+			"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+		}
+	default: // linux, *bsd
+		return []string{
+			"google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+			"microsoft-edge", "microsoft-edge-stable", "brave-browser", "vivaldi",
+		}
+	}
+}
+
+// openAppWindow launches the UI as a frameless standalone window using the
+// first Chromium-based browser found. Each gets its own throwaway profile dir
+// so the app window is independent of the user's normal browsing session.
+// Falls back to the default browser if no Chromium binary is present.
+func openAppWindow(url string) {
+	for _, bin := range chromiumCandidates() {
+		path, err := exec.LookPath(bin)
+		if err != nil {
+			if _, statErr := os.Stat(bin); statErr != nil {
+				continue
+			}
+			path = bin
+		}
+		profile := filepath.Join(os.TempDir(), "cascade-app-profile")
+		cmd := exec.Command(path,
+			"--app="+url,
+			"--user-data-dir="+profile,
+			"--no-first-run",
+			"--no-default-browser-check",
+		)
+		if err := cmd.Start(); err == nil {
+			return
+		}
+	}
+	// No Chromium browser found — degrade to the default browser.
+	fmt.Println("(no Chromium browser found for --app window; opening default browser)")
+	openBrowser(url)
 }
